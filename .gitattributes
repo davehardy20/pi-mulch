@@ -1,1 +1,5 @@
 .mulch/expertise/*.jsonl merge=union
+
+.seeds/issues.jsonl merge=union
+.seeds/templates.jsonl merge=union
+.seeds/plans.jsonl merge=union
