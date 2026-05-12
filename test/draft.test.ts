@@ -1,142 +1,475 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { generateDrafts, listDrafts, getDraft, markDraftApplied, deleteDraft } from "../src/draft.js";
-import { runMulch } from "../src/exec.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_MULCH_CONFIG } from "../src/config.js";
+import {
+  applyDraftFile,
+  getLatestLinterStatus,
+  loadDraftFile,
+  maybeWriteSessionDraft,
+} from "../src/draft.js";
+import type { MulchDraftFile } from "../src/types.js";
 
-vi.mock("../src/exec.js", () => ({
-  runMulch: vi.fn(),
-}));
+const tempDirs: string[] = [];
 
-const TEST_CWD = "/tmp/pi-mulch-test";
+function makeTempDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-mulch-draft-"));
+  tempDirs.push(dir);
+  return dir;
+}
 
-beforeEach(() => {
-  // Clean test directory
-  try {
-    fs.rmSync(TEST_CWD, { recursive: true });
-  } catch {
-    // ignore
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  fs.mkdirSync(path.join(TEST_CWD, ".mulch", "drafts"), { recursive: true });
 });
 
-describe("generateDrafts", () => {
-  it("creates draft files in .mulch/drafts/", async () => {
-    vi.mocked(runMulch).mockResolvedValue({
-      stdout: JSON.stringify({ suggestedDomains: [{ domain: "frontend" }] }),
-      stderr: "",
-      code: 0,
+function readyDetection(repoRoot: string) {
+  return {
+    cliAvailable: true,
+    cliCommand: "mulch",
+    directoryExists: true,
+    directoryPath: path.join(repoRoot, ".mulch"),
+    isWorktree: false,
+    mainWorktreeRoot: null,
+    isGitRepo: true,
+    gitRepoRoot: repoRoot,
+    commandCwd: repoRoot,
+    ready: true,
+  };
+}
+
+describe("getLatestLinterStatus", () => {
+  it("prefers the latest clean status message", () => {
+    expect(
+      getLatestLinterStatus([
+        {
+          type: "custom_message",
+          customType: "post-turn-linter-status",
+          details: { status: "clean" },
+        },
+      ] as never),
+    ).toBe("clean");
+
+    expect(
+      getLatestLinterStatus([
+        {
+          type: "custom_message",
+          customType: "post-turn-linter",
+          content: "findings",
+        },
+      ] as never),
+    ).toBe("findings");
+  });
+});
+
+describe("maybeWriteSessionDraft", () => {
+  it("writes a draft only after a clean linter status", async () => {
+    const repoRoot = makeTempDir();
+    const draftPath = await maybeWriteSessionDraft(
+      {
+        detection: readyDetection(repoRoot),
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: {
+          getEntries: () => [
+            {
+              type: "custom_message",
+              customType: "post-turn-linter-status",
+              details: { status: "clean" },
+            },
+          ],
+        } as never,
+        touchedFiles: [path.join(repoRoot, "src/index.ts")],
+        lastUserPrompt: "implement feature",
+      },
+      async () => ({
+        command: "mulch",
+        args: ["learn"],
+        cwd: repoRoot,
+        exitCode: 0,
+        stdout: '{"suggestedDomains":["extensions"]}',
+        stderr: "",
+        ok: true,
+        json: { suggestedDomains: ["extensions"] },
+      }),
+    );
+
+    expect(draftPath).toBeTruthy();
+    const draft = loadDraftFile(draftPath as string);
+    expect(draft.records[0]).toMatchObject({
+      domain: "extensions",
+      placeholder: true,
     });
 
-    const drafts = await generateDrafts(
-      "mulch",
-      ["src/index.ts"],
-      TEST_CWD,
+    const skipped = await maybeWriteSessionDraft(
       {
-        enabled: true,
-        command: "mulch",
-        injectionMode: "manifest",
-        injectionBudget: 4000,
-        suppressInitPrompt: true,
-        draftMode: "auto",
-        autoLearnDomains: ["general"],
+        detection: readyDetection(repoRoot),
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: {
+          getEntries: () => [
+            {
+              type: "custom_message",
+              customType: "post-turn-linter",
+              content: "findings",
+            },
+          ],
+        } as never,
+        touchedFiles: [path.join(repoRoot, "src/index.ts")],
+        lastUserPrompt: "implement feature",
+      },
+      async () => {
+        throw new Error("should not run learn");
       },
     );
 
-    expect(drafts.length).toBeGreaterThan(0);
-    expect(drafts[0].domain).toBe("frontend");
-    expect(drafts[0].files).toEqual(["src/index.ts"]);
+    expect(skipped).toBeNull();
   });
+});
 
-  it("falls back to autoLearnDomains when learn has no suggestions", async () => {
-    vi.mocked(runMulch).mockResolvedValue({
-      stdout: JSON.stringify({ suggestedDomains: [] }),
-      stderr: "",
-      code: 0,
-    });
+describe("applyDraftFile", () => {
+  it("applies only actionable records and persists apply results", async () => {
+    const repoRoot = makeTempDir();
+    const draftsDir = path.join(repoRoot, ".mulch", "drafts");
+    fs.mkdirSync(draftsDir, { recursive: true });
+    const draftPath = path.join(draftsDir, "draft.json");
+    const draft: MulchDraftFile = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      repoRoot,
+      linterStatus: "clean",
+      lastUserPrompt: "ship it",
+      touchedFiles: ["src/index.ts"],
+      learn: {},
+      records: [
+        {
+          domain: "extensions",
+          type: "guide",
+          name: "Mulch package",
+          description: "Keep it separate",
+          files: ["src/index.ts"],
+          placeholder: false,
+        },
+        {
+          domain: "extensions",
+          type: "guide",
+          name: "Placeholder",
+          description: "skip me",
+          placeholder: true,
+        },
+      ],
+    };
+    fs.writeFileSync(draftPath, JSON.stringify(draft, null, 2));
 
-    const drafts = await generateDrafts(
-      "mulch",
-      ["src/index.ts"],
-      TEST_CWD,
-      {
-        enabled: true,
-        command: "mulch",
-        injectionMode: "manifest",
-        injectionBudget: 4000,
-        suppressInitPrompt: true,
-        draftMode: "auto",
-        autoLearnDomains: ["general"],
+    const seenArgs: string[][] = [];
+    const applied = await applyDraftFile(
+      draftPath,
+      { command: "mulch", cwd: repoRoot },
+      async (options) => {
+        seenArgs.push(options.args);
+        return {
+          command: "mulch",
+          args: options.args,
+          cwd: repoRoot,
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          ok: true,
+        };
       },
     );
 
-    expect(drafts.length).toBeGreaterThan(0);
-    expect(drafts[0].domain).toBe("general");
+    expect(seenArgs).toHaveLength(1);
+    expect(seenArgs[0]?.slice(0, 3)).toEqual([
+      "record",
+      "extensions",
+      "--batch",
+    ]);
+    expect(applied.draft.applyResults).toEqual([
+      { domain: "extensions", appliedCount: 1 },
+    ]);
+    expect(loadDraftFile(draftPath).appliedAt).toBeTruthy();
   });
 
-  it("returns empty array when no files provided", async () => {
-    const drafts = await generateDrafts("mulch", [], TEST_CWD, {
-      enabled: true,
-      command: "mulch",
-      injectionMode: "manifest",
-      injectionBudget: 4000,
-      suppressInitPrompt: true,
-      draftMode: "auto",
-      autoLearnDomains: ["general"],
-    });
-    expect(drafts).toEqual([]);
+  it("includes failed results when mulch record command errors", async () => {
+    const repoRoot = makeTempDir();
+    const draftsDir = path.join(repoRoot, ".mulch", "drafts");
+    fs.mkdirSync(draftsDir, { recursive: true });
+    const draftPath = path.join(draftsDir, "draft.json");
+    const draft: MulchDraftFile = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      repoRoot,
+      linterStatus: "clean",
+      lastUserPrompt: "ship it",
+      touchedFiles: ["src/index.ts"],
+      learn: {},
+      records: [
+        {
+          domain: "extensions",
+          type: "guide",
+          name: "Mulch package",
+          description: "Keep it separate",
+          files: ["src/index.ts"],
+          placeholder: false,
+        },
+      ],
+    };
+    fs.writeFileSync(draftPath, JSON.stringify(draft, null, 2));
+
+    const applied = await applyDraftFile(
+      draftPath,
+      { command: "mulch", cwd: repoRoot },
+      async (options) => ({
+        command: options.command ?? "mulch",
+        args: options.args,
+        cwd: repoRoot,
+        exitCode: 1,
+        stdout: "",
+        stderr: "record failed",
+        ok: false,
+      }),
+    );
+
+    expect(applied.results).toHaveLength(1);
+    expect(applied.results[0]?.ok).toBe(false);
+    expect(applied.results[0]?.stderr).toBe("record failed");
+    // applyResults should not include the failed domain
+    expect(applied.draft.applyResults).toEqual([]);
+    // But appliedAt should still be set (best-effort)
+    expect(applied.draft.appliedAt).toBeTruthy();
   });
 });
 
-describe("listDrafts", () => {
-  it("returns unapplied drafts sorted by date", () => {
-    const d1 = { id: "d1", domain: "a", type: "convention", files: [], createdAt: "2024-01-01T00:00:00Z", applied: false };
-    const d2 = { id: "d2", domain: "b", type: "convention", files: [], createdAt: "2024-01-02T00:00:00Z", applied: false };
-    const d3 = { id: "d3", domain: "c", type: "convention", files: [], createdAt: "2024-01-03T00:00:00Z", applied: true };
-
-    fs.writeFileSync(path.join(TEST_CWD, ".mulch/drafts/d1.json"), JSON.stringify(d1));
-    fs.writeFileSync(path.join(TEST_CWD, ".mulch/drafts/d2.json"), JSON.stringify(d2));
-    fs.writeFileSync(path.join(TEST_CWD, ".mulch/drafts/d3.json"), JSON.stringify(d3));
-
-    const drafts = listDrafts(TEST_CWD);
-    expect(drafts.length).toBe(2);
-    expect(drafts[0].id).toBe("d2");
-    expect(drafts[1].id).toBe("d1");
+describe("maybeWriteSessionDraft safety", () => {
+  it("returns null when detection is null", async () => {
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: null,
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: { getEntries: () => [] },
+        touchedFiles: ["/repo/src/index.ts"],
+        lastUserPrompt: "do stuff",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
   });
 
-  it("returns empty array when no drafts dir", () => {
-    fs.rmSync(path.join(TEST_CWD, ".mulch"), { recursive: true });
-    expect(listDrafts(TEST_CWD)).toEqual([]);
+  it("returns null when cliCommand is null", async () => {
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: {
+          cliAvailable: false,
+          cliCommand: null,
+          directoryExists: true,
+          directoryPath: "/repo/.mulch",
+          isWorktree: false,
+          mainWorktreeRoot: null,
+          isGitRepo: true,
+          gitRepoRoot: "/repo",
+          commandCwd: "/repo",
+          ready: false,
+        },
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: { getEntries: () => [] },
+        touchedFiles: ["/repo/src/index.ts"],
+        lastUserPrompt: "do stuff",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
   });
-});
 
-describe("getDraft", () => {
-  it("retrieves a draft by id", () => {
-    const draft = { id: "x", domain: "a", type: "convention", files: [], createdAt: "2024-01-01T00:00:00Z", applied: false };
-    fs.writeFileSync(path.join(TEST_CWD, ".mulch/drafts/x.json"), JSON.stringify(draft));
-    expect(getDraft(TEST_CWD, "x")?.id).toBe("x");
+  it("returns null when learn command fails", async () => {
+    const repoRoot = makeTempDir();
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: readyDetection(repoRoot),
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: {
+          getEntries: () => [
+            {
+              type: "custom_message",
+              customType: "post-turn-linter-status",
+              details: { status: "clean" },
+            },
+          ],
+        } as never,
+        touchedFiles: [path.join(repoRoot, "src/index.ts")],
+        lastUserPrompt: "implement feature",
+      },
+      async () => ({
+        command: "mulch",
+        args: ["learn"],
+        cwd: repoRoot,
+        exitCode: 1,
+        stdout: "",
+        stderr: "learn failed",
+        ok: false,
+      }),
+    );
+
+    expect(result).toBeNull();
   });
 
-  it("returns null for missing draft", () => {
-    expect(getDraft(TEST_CWD, "missing")).toBeNull();
+  it("returns null when detection is ready but gitRepoRoot is null", async () => {
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: {
+          cliAvailable: true,
+          cliCommand: "mulch",
+          directoryExists: true,
+          directoryPath: "/repo/.mulch",
+          isWorktree: false,
+          mainWorktreeRoot: null,
+          isGitRepo: false,
+          gitRepoRoot: null,
+          commandCwd: "/repo",
+          ready: true,
+        },
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: { getEntries: () => [] },
+        touchedFiles: ["/repo/src/index.ts"],
+        lastUserPrompt: "do stuff",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
   });
-});
 
-describe("markDraftApplied", () => {
-  it("marks a draft as applied", () => {
-    const draft = { id: "x", domain: "a", type: "convention", files: [], createdAt: "2024-01-01T00:00:00Z", applied: false };
-    fs.writeFileSync(path.join(TEST_CWD, ".mulch/drafts/x.json"), JSON.stringify(draft));
-    markDraftApplied(TEST_CWD, "x");
-    const updated = getDraft(TEST_CWD, "x");
-    expect(updated?.applied).toBe(true);
+  it("returns null when draftMode is off", async () => {
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: {
+          cliAvailable: true,
+          cliCommand: "mulch",
+          directoryExists: true,
+          directoryPath: "/repo/.mulch",
+          isWorktree: false,
+          mainWorktreeRoot: null,
+          isGitRepo: true,
+          gitRepoRoot: "/repo",
+          commandCwd: "/repo",
+          ready: true,
+        },
+        config: { ...DEFAULT_MULCH_CONFIG, draftMode: "off" },
+        sessionManager: { getEntries: () => [] },
+        touchedFiles: ["/repo/src/index.ts"],
+        lastUserPrompt: "do stuff",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
   });
-});
 
-describe("deleteDraft", () => {
-  it("removes a draft file", () => {
-    const draft = { id: "x", domain: "a", type: "convention", files: [], createdAt: "2024-01-01T00:00:00Z", applied: false };
-    fs.writeFileSync(path.join(TEST_CWD, ".mulch/drafts/x.json"), JSON.stringify(draft));
-    deleteDraft(TEST_CWD, "x");
-    expect(getDraft(TEST_CWD, "x")).toBeNull();
+  it("returns null when no touched files exist", async () => {
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: {
+          cliAvailable: true,
+          cliCommand: "mulch",
+          directoryExists: true,
+          directoryPath: "/repo/.mulch",
+          isWorktree: false,
+          mainWorktreeRoot: null,
+          isGitRepo: true,
+          gitRepoRoot: "/repo",
+          commandCwd: "/repo",
+          ready: true,
+        },
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: { getEntries: () => [] },
+        touchedFiles: [],
+        lastUserPrompt: "do stuff",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when linter status has findings", async () => {
+    const repoRoot = makeTempDir();
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: readyDetection(repoRoot),
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: {
+          getEntries: () => [
+            {
+              type: "custom_message",
+              customType: "post-turn-linter-status",
+              details: { status: "findings" },
+            },
+          ],
+        } as never,
+        touchedFiles: [path.join(repoRoot, "src/index.ts")],
+        lastUserPrompt: "implement feature",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when linter status has error", async () => {
+    const repoRoot = makeTempDir();
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: readyDetection(repoRoot),
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: {
+          getEntries: () => [
+            {
+              type: "custom_message",
+              customType: "post-turn-linter-status",
+              details: { status: "error" },
+            },
+          ],
+        } as never,
+        touchedFiles: [path.join(repoRoot, "src/index.ts")],
+        lastUserPrompt: "implement feature",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when touched files are outside repo root", async () => {
+    const repoRoot = makeTempDir();
+    const result = await maybeWriteSessionDraft(
+      {
+        detection: readyDetection(repoRoot),
+        config: DEFAULT_MULCH_CONFIG,
+        sessionManager: {
+          getEntries: () => [
+            {
+              type: "custom_message",
+              customType: "post-turn-linter-status",
+              details: { status: "clean" },
+            },
+          ],
+        } as never,
+        touchedFiles: ["/other-repo/src/index.ts"],
+        lastUserPrompt: "implement feature",
+      },
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+    expect(result).toBeNull();
   });
 });

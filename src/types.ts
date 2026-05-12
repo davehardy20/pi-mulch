@@ -1,104 +1,93 @@
-/**
- * Shared types and interfaces for the pi-mulch extension.
- */
+export type MulchInjectionMode = "manifest";
+export type MulchDraftMode = "off" | "session-end";
+export type MulchLinterStatus = "unknown" | "clean" | "findings" | "error";
+export type MulchRecordType =
+  | "convention"
+  | "pattern"
+  | "failure"
+  | "decision"
+  | "reference"
+  | "guide";
+export type MulchClassification = "foundational" | "tactical" | "observational";
+export type MulchCallableToolName =
+  | "mulch_prime"
+  | "mulch_search"
+  | "mulch_query"
+  | "mulch_learn"
+  | "mulch_status";
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-/**
- * Resolved Mulch extension configuration.
- */
-export interface PiMulchConfig {
-  /** Enable or disable the entire extension */
+export interface MulchConfig {
   enabled: boolean;
-  /** CLI binary name or path; auto-detected if bare name */
-  command: string;
-  /** Priming mode: "manifest" | "prime" | "auto" */
-  injectionMode: "manifest" | "prime" | "auto";
-  /** Token budget for priming output */
-  injectionBudget: number;
-  /** Whether to suppress init prompting entirely */
-  suppressInitPrompt: boolean;
-  /** Draft mode: "auto" | "manual" | "off" */
-  draftMode: "auto" | "manual" | "off";
-  /** Domains to auto-generate drafts for at session end */
-  autoLearnDomains: string[];
+  command: string | null;
+  cliCandidates: string[];
+  injectionMode: MulchInjectionMode;
+  primeBudget: number;
+  promptOnMissingInit: boolean;
+  persistInitDecline: boolean;
+  draftMode: MulchDraftMode;
+  draftDir: string;
+  initStateFile: string;
+  maxTrackedFiles: number;
+  llmTools: MulchCallableToolName[];
 }
 
-/** Default configuration values. */
-export const DEFAULT_CONFIG: PiMulchConfig = {
-  enabled: true,
-  command: "mulch",
-  injectionMode: "manifest",
-  injectionBudget: 4000,
-  suppressInitPrompt: false,
-  draftMode: "auto",
-  autoLearnDomains: ["general"],
-};
-
-// ---------------------------------------------------------------------------
-// Session state
-// ---------------------------------------------------------------------------
-
-/** Per-session mutable state */
-export interface MulchState {
-  /** Whether init has been offered this session */
-  initOffered: boolean;
-  /** Whether the user declined init this session */
-  initDeclined: boolean;
-  /** Whether we have primed at least once */
-  primedOnce: boolean;
-  /** The last priming content hash injected (for dedup) */
-  lastPrimeHash: string | null;
-  /** Set of normalized file paths touched this session */
-  touchedFiles: Set<string>;
-  /** Last known linter status */
-  lastLinterStatus: "unknown" | "clean" | "dirty" | "running";
-  /** Whether a draft generation is in progress */
-  draftInProgress: boolean;
+export interface MulchPrimeRequest {
+  mode: "manifest" | "files";
+  args: string[];
+  signature: string;
+  scopedFiles: string[];
 }
 
-// ---------------------------------------------------------------------------
-// Drafts
-// ---------------------------------------------------------------------------
+export interface MulchPrimeInjection {
+  mode: "manifest" | "files";
+  signature: string;
+  content: string;
+}
 
-/** Draft record metadata */
-export interface DraftRecord {
-  id: string;
+export interface MulchDraftRecord {
   domain: string;
-  type: "convention" | "pattern" | "failure" | "decision" | "reference" | "guide" | "observational";
-  title?: string;
+  type: MulchRecordType;
+  classification?: MulchClassification;
   name?: string;
+  title?: string;
   description?: string;
-  content?: string;
-  resolution?: string;
   rationale?: string;
-  files: string[];
-  filePath?: string;
+  resolution?: string;
+  content?: string;
+  files?: string[];
+  tags?: string[];
+  placeholder?: boolean;
+}
+
+export interface MulchDraftFile {
+  version: 1;
   createdAt: string;
-  applied: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Detection
-// ---------------------------------------------------------------------------
-
-/** Result of Mulch CLI and .mulch/ detection */
-export interface MulchDetection {
-  cliAvailable: boolean;
-  cliCommand: string;
-  cliPath: string;
-  version: string;
-  dotMulchExists: boolean;
-  mulchDirExists: boolean;
-  mulchDirPath: string | null;
   repoRoot: string;
+  linterStatus: MulchLinterStatus;
+  lastUserPrompt: string;
+  touchedFiles: string[];
+  learn: unknown;
+  records: MulchDraftRecord[];
+  appliedAt?: string;
+  applyResults?: Array<{
+    domain: string;
+    appliedCount: number;
+  }>;
 }
 
-// ---------------------------------------------------------------------------
-// Aliases for backward compatibility
-// ---------------------------------------------------------------------------
+export interface RepoInitState {
+  suppressInitPrompt?: boolean;
+  declinedAt?: string;
+  initializedAt?: string;
+}
 
-/** Per-session mutable state (alias for MulchState) */
-export type MulchSessionState = MulchState;
+export interface MulchCommandResult {
+  command: string;
+  args: string[];
+  cwd: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  ok: boolean;
+  json?: unknown;
+}

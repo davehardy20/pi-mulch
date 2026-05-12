@@ -1,65 +1,112 @@
-/**
- * Per-session/repo state management and init-prompt suppression.
- *
- * Init suppression is repo-local persistent: when the user declines
- * mulch init, a marker file is created in the repo so we don't ask
- * again in future sessions.
- */
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { DEFAULT_MULCH_CONFIG } from "./config.js";
+import type { MulchDetectionResult } from "./detect.js";
+import { createTouchedFileTracker, type TouchedFileTracker } from "./paths.js";
+import type { MulchConfig, RepoInitState } from "./types.js";
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import type { MulchSessionState } from "./types.js";
+export interface MulchSessionState {
+  config: MulchConfig;
+  detection: MulchDetectionResult | null;
+  touchedFiles: TouchedFileTracker;
+  initPromptedRepos: Set<string>;
+  lastPrimeSignature: string | null;
+  lastPrimeContent: string | null;
+  lastUserPrompt: string;
+  latestDraftPath: string | null;
+}
 
-const SUPPRESS_MARKER = ".mulch/.pi-init-suppressed";
+export interface RepoStateDeps {
+  existsSync?: typeof fs.existsSync;
+  readFileSync?: typeof fs.readFileSync;
+  writeFileSync?: typeof fs.writeFileSync;
+  mkdirSync?: typeof fs.mkdirSync;
+}
 
-/**
- * Create a fresh session state.
- */
-export function createState(): MulchSessionState {
+export function createMulchSessionState(
+  config: MulchConfig = DEFAULT_MULCH_CONFIG,
+): MulchSessionState {
   return {
-    initOffered: false,
-    initDeclined: false,
-    touchedFiles: new Set(),
-    lastPrimeHash: null,
-    primedOnce: false,
-    lastLinterStatus: "unknown",
-    draftInProgress: false,
+    config,
+    detection: null,
+    touchedFiles: createTouchedFileTracker(),
+    initPromptedRepos: new Set<string>(),
+    lastPrimeSignature: null,
+    lastPrimeContent: null,
+    lastUserPrompt: "",
+    latestDraftPath: null,
   };
 }
 
-/**
- * Check whether init prompting is suppressed for a repo.
- */
-export function isInitSuppressed(repoRoot: string): boolean {
-  const markerPath = resolve(repoRoot, SUPPRESS_MARKER);
-  return existsSync(markerPath);
-}
-
-/**
- * Persistently suppress init prompting for a repo.
- */
-export function suppressInitForRepo(repoRoot: string): void {
-  const mulchDir = resolve(repoRoot, ".mulch");
-  if (!existsSync(mulchDir)) {
-    mkdirSync(mulchDir, { recursive: true });
-  }
-  const markerPath = resolve(repoRoot, SUPPRESS_MARKER);
-  writeFileSync(
-    markerPath,
-    `# pi-mulch extension: init prompting suppressed\n# Created: ${new Date().toISOString()}\n`,
-    "utf-8",
-  );
-}
-
-/**
- * Reset session state (clears in-memory state but not persistent suppression).
- */
-export function resetState(state: MulchSessionState): void {
-  state.initOffered = false;
-  state.initDeclined = false;
+export function resetMulchSessionState(
+  state: MulchSessionState,
+  config: MulchConfig,
+): void {
+  state.config = config;
+  state.detection = null;
   state.touchedFiles.clear();
-  state.lastPrimeHash = null;
-  state.primedOnce = false;
-  state.lastLinterStatus = "unknown";
-  state.draftInProgress = false;
+  state.initPromptedRepos.clear();
+  state.lastPrimeSignature = null;
+  state.lastPrimeContent = null;
+  state.lastUserPrompt = "";
+  state.latestDraftPath = null;
+}
+
+export function getRepoInitStatePath(
+  repoRoot: string,
+  config: MulchConfig,
+): string {
+  return path.resolve(repoRoot, config.initStateFile);
+}
+
+export function loadRepoInitState(
+  repoRoot: string,
+  config: MulchConfig,
+  deps: RepoStateDeps = {},
+): RepoInitState {
+  const existsSync = deps.existsSync ?? fs.existsSync;
+  const readFileSync = deps.readFileSync ?? fs.readFileSync;
+  const filePath = getRepoInitStatePath(repoRoot, config);
+
+  if (!existsSync(filePath)) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as RepoInitState;
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveRepoInitState(
+  repoRoot: string,
+  config: MulchConfig,
+  state: RepoInitState,
+  deps: RepoStateDeps = {},
+): string {
+  const writeFileSync = deps.writeFileSync ?? fs.writeFileSync;
+  const mkdirSync = deps.mkdirSync ?? fs.mkdirSync;
+  const filePath = getRepoInitStatePath(repoRoot, config);
+
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  return filePath;
+}
+
+export function shouldOfferInitPrompt(
+  detection: MulchDetectionResult | null,
+  config: MulchConfig,
+  state: MulchSessionState,
+  repoInitState: RepoInitState,
+): boolean {
+  if (!config.enabled) return false;
+  if (!config.promptOnMissingInit) return false;
+  if (!detection?.cliAvailable) return false;
+  if (detection.directoryExists) return false;
+  if (!detection.isGitRepo || !detection.gitRepoRoot) return false;
+  if (repoInitState.suppressInitPrompt) return false;
+  if (state.initPromptedRepos.has(detection.gitRepoRoot)) return false;
+  return true;
 }

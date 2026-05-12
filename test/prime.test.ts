@@ -1,56 +1,185 @@
-import { describe, it, expect, vi } from "vitest";
-import { getManifestPrime, getScopedPrime, buildPrimeMessage } from "../src/prime.js";
-import { runMulch } from "../src/exec.js";
+import { describe, expect, it } from "vitest";
+import { DEFAULT_MULCH_CONFIG } from "../src/config.js";
+import {
+  buildPrimeRequest,
+  createPrimeInjection,
+  shouldInjectPrime,
+} from "../src/prime.js";
 
-vi.mock("../src/exec.js", () => ({
-  runMulch: vi.fn(),
-}));
+const detection = {
+  cliAvailable: true,
+  cliCommand: "mulch",
+  directoryExists: true,
+  directoryPath: "/repo/.mulch",
+  isWorktree: false,
+  mainWorktreeRoot: null,
+  isGitRepo: true,
+  gitRepoRoot: "/repo",
+  commandCwd: "/repo",
+  ready: true,
+} as const;
 
-describe("getManifestPrime", () => {
-  it("returns null when mulch prime --manifest fails", async () => {
-    vi.mocked(runMulch).mockResolvedValue({ stdout: "", stderr: "error", code: 1 });
-    const result = await getManifestPrime("mulch", "/project");
-    expect(result).toBeNull();
-  });
-
-  it("returns prime result on success", async () => {
-    vi.mocked(runMulch).mockResolvedValue({ stdout: "  manifest content  ", stderr: "", code: 0 });
-    const result = await getManifestPrime("mulch", "/project");
-    expect(result).not.toBeNull();
-    expect(result?.content).toBe("manifest content");
-    expect(result?.mode).toBe("manifest");
-    expect(result?.hash).toBeDefined();
-  });
-});
-
-describe("getScopedPrime", () => {
-  it("passes files and budget to mulch prime", async () => {
-    vi.mocked(runMulch).mockResolvedValue({ stdout: "scoped content", stderr: "", code: 0 });
-    const result = await getScopedPrime("mulch", ["a.ts", "b.ts"], "/project", {
-      enabled: true,
-      command: "mulch",
-      injectionMode: "auto",
-      injectionBudget: 2000,
-      suppressInitPrompt: true,
-      draftMode: "auto",
-      autoLearnDomains: ["general"],
+describe("buildPrimeRequest", () => {
+  it("uses manifest mode with no touched files", () => {
+    expect(
+      buildPrimeRequest(detection, [], DEFAULT_MULCH_CONFIG),
+    ).toMatchObject({
+      mode: "manifest",
+      args: ["prime", "--manifest", "--budget", "4000", "--format", "plain"],
+      signature: "manifest:4000",
     });
-    expect(runMulch).toHaveBeenCalledWith(
-      "mulch",
-      ["prime", "--compact", "--files", "a.ts", "b.ts", "--budget", "2000"],
-      "/project",
-      undefined,
-    );
-    expect(result?.content).toBe("scoped content");
-    expect(result?.mode).toBe("scoped");
+  });
+
+  it("uses file-scoped prime when touched files exist", () => {
+    expect(
+      buildPrimeRequest(
+        detection,
+        ["/repo/src/index.ts"],
+        DEFAULT_MULCH_CONFIG,
+      ),
+    ).toMatchObject({
+      mode: "files",
+      args: [
+        "prime",
+        "--files",
+        "src/index.ts",
+        "--budget",
+        "4000",
+        "--format",
+        "plain",
+      ],
+      signature: "files:src/index.ts:4000",
+    });
   });
 });
 
-describe("buildPrimeMessage", () => {
-  it("formats prime result as hidden message content", () => {
-    const msg = buildPrimeMessage({ content: "test", hash: "123", mode: "manifest" });
-    expect(msg).toContain("## Mulch Context");
-    expect(msg).toContain("Mode: manifest");
-    expect(msg).toContain("test");
+describe("createPrimeInjection", () => {
+  it("returns prime content and dedupes repeated injections", async () => {
+    const injection = await createPrimeInjection(
+      {
+        detection,
+        touchedFiles: [],
+        config: DEFAULT_MULCH_CONFIG,
+      },
+      async () => ({
+        command: "mulch",
+        args: ["prime"],
+        cwd: "/repo",
+        exitCode: 0,
+        stdout: "manifest text\n",
+        stderr: "",
+        ok: true,
+      }),
+    );
+
+    expect(injection).toEqual({
+      mode: "manifest",
+      signature: "manifest:4000",
+      content: "manifest text",
+    });
+    expect(
+      shouldInjectPrime(null, null, injection as NonNullable<typeof injection>),
+    ).toBe(true);
+    expect(
+      shouldInjectPrime(
+        "manifest:4000",
+        "manifest text",
+        injection as NonNullable<typeof injection>,
+      ),
+    ).toBe(false);
+  });
+
+  it("returns null when mulch prime command fails", async () => {
+    const injection = await createPrimeInjection(
+      {
+        detection,
+        touchedFiles: [],
+        config: DEFAULT_MULCH_CONFIG,
+      },
+      async () => ({
+        command: "mulch",
+        args: ["prime", "--manifest"],
+        cwd: "/repo",
+        exitCode: 1,
+        stdout: "",
+        stderr: "error: prime failed",
+        ok: false,
+      }),
+    );
+
+    expect(injection).toBeNull();
+  });
+
+  it("returns null when mulch prime returns empty output", async () => {
+    const injection = await createPrimeInjection(
+      {
+        detection,
+        touchedFiles: [],
+        config: DEFAULT_MULCH_CONFIG,
+      },
+      async () => ({
+        command: "mulch",
+        args: ["prime", "--manifest"],
+        cwd: "/repo",
+        exitCode: 0,
+        stdout: "   \n  ",
+        stderr: "",
+        ok: true,
+      }),
+    );
+
+    expect(injection).toBeNull();
+  });
+
+  it("returns null when detection is not ready", async () => {
+    const injection = await createPrimeInjection(
+      {
+        detection: {
+          cliAvailable: true,
+          cliCommand: "mulch",
+          directoryExists: false,
+          directoryPath: "/repo/.mulch",
+          isWorktree: false,
+          mainWorktreeRoot: null,
+          isGitRepo: true,
+          gitRepoRoot: "/repo",
+          commandCwd: "/repo",
+          ready: false,
+        },
+        touchedFiles: [],
+        config: DEFAULT_MULCH_CONFIG,
+      },
+      async () => {
+        throw new Error("should not be called");
+      },
+    );
+
+    expect(injection).toBeNull();
+  });
+
+  it("returns null when cliCommand is null", async () => {
+    const injection = await createPrimeInjection(
+      {
+        detection: {
+          cliAvailable: false,
+          cliCommand: null,
+          directoryExists: true,
+          directoryPath: "/repo/.mulch",
+          isWorktree: false,
+          mainWorktreeRoot: null,
+          isGitRepo: true,
+          gitRepoRoot: "/repo",
+          commandCwd: "/repo",
+          ready: false,
+        },
+        touchedFiles: [],
+        config: DEFAULT_MULCH_CONFIG,
+      },
+      async () => {
+        throw new Error("should not be called");
+      },
+    );
+
+    expect(injection).toBeNull();
   });
 });

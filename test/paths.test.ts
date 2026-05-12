@@ -1,113 +1,78 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  detectTouchedFilesFromToolEvent,
-  detectTouchedFilesFromToolResult,
+  createTouchedFileTracker,
+  extractPathsFromBashCommand,
+  extractPathsFromToolCall,
+  extractPathsFromToolResultDetails,
+  normalizeInputPath,
 } from "../src/paths.js";
 
-describe("detectTouchedFilesFromToolEvent", () => {
-  it("tracks read tool paths", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "read", args: { path: "src/index.ts" } },
-      "/project",
+describe("normalizeInputPath", () => {
+  it("normalizes absolute, relative, and file URI paths", () => {
+    expect(normalizeInputPath("/foo//bar/")).toBe("/foo/bar");
+    expect(normalizeInputPath("src/index.ts", "/repo")).toBe(
+      "/repo/src/index.ts",
     );
-    expect(files).toEqual(["/project/src/index.ts"]);
-  });
-
-  it("tracks write tool paths", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "write", args: { path: "README.md" } },
-      "/project",
+    expect(normalizeInputPath("file:///tmp/example.ts")).toBe(
+      "/tmp/example.ts",
     );
-    expect(files).toEqual(["/project/README.md"]);
-  });
-
-  it("tracks edit tool paths", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "edit", args: { path: "src/utils.ts" } },
-      "/project",
-    );
-    expect(files).toEqual(["/project/src/utils.ts"]);
-  });
-
-  it("tracks hashline_edit with rename", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "hashline_edit", args: { filePath: "old.ts", rename: "new.ts" } },
-      "/project",
-    );
-    expect(files).toEqual(["/project/old.ts", "/project/new.ts"]);
-  });
-
-  it("tracks lsp_rename paths", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "lsp_rename", args: { filePath: "src/main.ts" } },
-      "/project",
-    );
-    expect(files).toEqual(["/project/src/main.ts"]);
-  });
-
-  it("tracks ast_grep_replace paths", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "ast_grep_replace", args: { paths: ["a.ts", "b.ts"] } },
-      "/project",
-    );
-    expect(files).toEqual(["/project/a.ts", "/project/b.ts"]);
-  });
-
-  it("ignores unknown tools", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "bash", args: { command: "echo hi" } },
-      "/project",
-    );
-    expect(files).toEqual([]);
-  });
-
-  it("returns empty for missing path", () => {
-    const files = detectTouchedFilesFromToolEvent(
-      { toolName: "write", args: {} },
-      "/project",
-    );
-    expect(files).toEqual([]);
   });
 });
 
-describe("detectTouchedFilesFromToolResult", () => {
-  it("reads modifiedFiles from shared contract", () => {
-    const files = detectTouchedFilesFromToolResult(
-      {
-        toolName: "write",
-        result: {
-          details: { modifiedFiles: ["src/a.ts", "src/b.ts"] },
-        },
-      },
-      "/project",
-    );
-    expect(files).toEqual(["/project/src/a.ts", "/project/src/b.ts"]);
+describe("createTouchedFileTracker", () => {
+  it("deduplicates equivalent paths", () => {
+    const tracker = createTouchedFileTracker();
+    tracker.add("src/index.ts", "/repo");
+    tracker.add("/repo/src//index.ts");
+    expect(tracker.size).toBe(1);
+    expect(tracker.getAll()).toEqual(["/repo/src/index.ts"]);
   });
+});
 
-  it("falls back to lsp_rename changes", () => {
-    const files = detectTouchedFilesFromToolResult(
-      {
-        toolName: "lsp_rename",
-        result: {
-          details: {
-            edit: {
-              changes: {
-                "file:///project/src/main.ts": [],
-              },
-            },
-          },
+describe("extractPathsFromToolCall", () => {
+  it("reads built-in tool paths and nested custom fields", () => {
+    expect(
+      extractPathsFromToolCall({
+        type: "tool_call",
+        toolCallId: "1",
+        toolName: "read",
+        input: { path: "README.md" },
+      } as never),
+    ).toEqual(["README.md"]);
+
+    expect(
+      extractPathsFromToolCall({
+        type: "tool_call",
+        toolCallId: "2",
+        toolName: "lsp_apply",
+        input: {
+          filePaths: ["src/a.ts", "src/b.ts"],
+          edit: { newUri: "file:///tmp/generated.ts" },
         },
-      },
-      "/project",
-    );
-    expect(files).toEqual(["/project/src/main.ts"]);
+      } as never),
+    ).toEqual(["src/a.ts", "src/b.ts", "file:///tmp/generated.ts"]);
   });
+});
 
-  it("returns null for unhandled tools", () => {
-    const files = detectTouchedFilesFromToolResult(
-      { toolName: "bash", result: {} },
-      "/project",
-    );
-    expect(files).toBeNull();
+describe("extractPathsFromToolResultDetails", () => {
+  it("collects modifiedFiles and nested path-like keys", () => {
+    expect(
+      extractPathsFromToolResultDetails({
+        modifiedFiles: ["src/main.ts"],
+        details: { newPath: "src/next.ts" },
+      }),
+    ).toEqual(["src/main.ts", "src/next.ts"]);
+  });
+});
+
+describe("extractPathsFromBashCommand", () => {
+  it("finds file arguments conservatively", () => {
+    expect(
+      extractPathsFromBashCommand('cat "path with spaces/file.txt"'),
+    ).toEqual(["path with spaces/file.txt"]);
+    expect(extractPathsFromBashCommand("echo hi > output.txt")).toEqual([
+      "output.txt",
+    ]);
+    expect(extractPathsFromBashCommand("git diff HEAD")).toEqual([]);
   });
 });

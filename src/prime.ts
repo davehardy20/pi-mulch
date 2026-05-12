@@ -1,120 +1,115 @@
-/**
- * Manifest-first and file-scoped priming with injection dedup.
- *
- * Handles injecting Mulch context into the LLM via hidden custom
- * messages in before_agent_start.
- */
+import * as path from "node:path";
+import type { MulchDetectionResult } from "./detect.js";
+import { type RunMulchCommandDeps, runMulchCommand } from "./exec.js";
+import { toRepoRelativePath } from "./path-utils.js";
+import type {
+  MulchConfig,
+  MulchPrimeInjection,
+  MulchPrimeRequest,
+} from "./types.js";
 
-import { createHash } from "node:crypto";
-import type { PiMulchConfig, MulchSessionState } from "./types.js";
-import { runMulch } from "./exec.js";
-import { getTouchedFilesRelative } from "./paths.js";
+export function buildPrimeRequest(
+  detection: MulchDetectionResult,
+  touchedFiles: readonly string[],
+  config: MulchConfig,
+): MulchPrimeRequest {
+  const repoRoot =
+    detection.gitRepoRoot ?? path.dirname(detection.directoryPath);
+  const scopedFiles = touchedFiles
+    .filter((filePath) => path.isAbsolute(filePath))
+    .filter(
+      (filePath) =>
+        filePath === repoRoot || filePath.startsWith(`${repoRoot}${path.sep}`),
+    )
+    .map((filePath) => toRepoRelativePath(filePath, repoRoot))
+    .filter((filePath) => filePath !== ".")
+    .slice(0, config.maxTrackedFiles);
 
-/**
- * Compute a fast hash of priming content for dedup.
- */
-function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex").slice(0, 16);
-}
-
-/**
- * Run `mulch prime --manifest` for first-turn injection.
- */
-export async function getManifestPrime(
-  command: string,
-  cwd: string,
-): Promise<{ content: string; hash: string; mode: "manifest" } | null> {
-  const result = await runMulch(command, ["prime", "--manifest"], cwd);
-  if (result.code !== 0 || !result.stdout.trim()) return null;
-
-  const content = result.stdout.trim();
-  return { content, hash: hashContent(content), mode: "manifest" };
-}
-
-/**
- * Run `mulch prime --files <paths> --budget <n>` for file-scoped injection.
- */
-export async function getScopedPrime(
-  command: string,
-  files: string[],
-  cwd: string,
-  config: PiMulchConfig,
-): Promise<{ content: string; hash: string; mode: "scoped" } | null> {
-  if (files.length === 0) return null;
-
-  const args = [
-    "prime",
-    "--compact",
-    "--files",
-    ...files,
-    "--budget",
-    String(config.injectionBudget),
-  ];
-
-  const result = await runMulch(command, args, cwd);
-  if (result.code !== 0 || !result.stdout.trim()) return null;
-
-  const content = result.stdout.trim();
-  return { content, hash: hashContent(content), mode: "scoped" };
-}
-
-/**
- * Build the hidden message content for prime injection.
- */
-export function buildPrimeMessage(prime: {
-  content: string;
-  hash: string;
-  mode: string;
-}): string {
-  return [
-    "## Mulch Context",
-    `Mode: ${prime.mode}`,
-    "",
-    prime.content,
-  ].join("\n");
-}
-
-/**
- * Compute what priming to inject for this turn.
- * Handles dedup via content hashing against state.lastPrimeHash.
- */
-export async function computePriming(
-  command: string,
-  cwd: string,
-  config: PiMulchConfig,
-  state: MulchSessionState,
-  signal?: AbortSignal,
-): Promise<{ content: string; hash: string; mode: "manifest" | "scoped" } | null> {
-  const touchedFiles = getTouchedFilesRelative(state, cwd);
-
-  // First turn or no touched files: manifest priming
-  if (!state.primedOnce || touchedFiles.length === 0) {
-    if (config.injectionMode === "manifest" || config.injectionMode === "auto" || !state.primedOnce) {
-      const prime = await getManifestPrime(command, cwd);
-      if (!prime) return null;
-      if (prime.hash === state.lastPrimeHash) return null;
-      return prime;
-    }
+  if (scopedFiles.length > 0) {
+    return {
+      mode: "files",
+      args: [
+        "prime",
+        "--files",
+        ...scopedFiles,
+        "--budget",
+        String(config.primeBudget),
+        "--format",
+        "plain",
+      ],
+      signature: `files:${scopedFiles.join(",")}:${config.primeBudget}`,
+      scopedFiles,
+    };
   }
 
-  // File-scoped priming for subsequent turns with touched files
-  if (touchedFiles.length > 0) {
-    const prime = await getScopedPrime(command, touchedFiles, cwd, config);
-    if (!prime) return null;
-    if (prime.hash === state.lastPrimeHash) return null;
-    return prime;
-  }
-
-  return null;
+  return {
+    mode: "manifest",
+    args: [
+      "prime",
+      "--manifest",
+      "--budget",
+      String(config.primeBudget),
+      "--format",
+      "plain",
+    ],
+    signature: `manifest:${config.primeBudget}`,
+    scopedFiles: [],
+  };
 }
 
-/**
- * Mark priming as injected (update hash in state).
- */
-export function markPrimingInjected(
-  state: MulchSessionState,
-  hash: string,
-): void {
-  state.lastPrimeHash = hash;
-  state.primedOnce = true;
+export async function createPrimeInjection(
+  params: {
+    detection: MulchDetectionResult;
+    touchedFiles: readonly string[];
+    config: MulchConfig;
+    signal?: AbortSignal;
+  },
+  runner: typeof runMulchCommand = runMulchCommand,
+  deps: RunMulchCommandDeps = {},
+): Promise<MulchPrimeInjection | null> {
+  if (!params.detection.ready || !params.detection.cliCommand) {
+    return null;
+  }
+
+  const request = buildPrimeRequest(
+    params.detection,
+    params.touchedFiles,
+    params.config,
+  );
+  const cwd = params.detection.commandCwd;
+  const result = await runner(
+    {
+      command: params.detection.cliCommand,
+      args: request.args,
+      cwd,
+      signal: params.signal,
+    },
+    deps,
+  );
+
+  if (!result.ok) {
+    return null;
+  }
+
+  const text = result.stdout.trim();
+  if (text.length === 0) {
+    return null;
+  }
+
+  return {
+    mode: request.mode,
+    signature: request.signature,
+    content: text,
+  };
+}
+
+export function shouldInjectPrime(
+  lastSignature: string | null,
+  lastContent: string | null,
+  nextInjection: MulchPrimeInjection,
+): boolean {
+  return (
+    lastSignature !== nextInjection.signature ||
+    lastContent !== nextInjection.content
+  );
 }
