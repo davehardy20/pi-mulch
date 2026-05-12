@@ -1,5 +1,5 @@
 {
-  "name": "pi-mulch-integration",
+  "name": "pi-mulch",
   "version": "0.1.0",
   "private": true,
   "description": "Pi package that integrates Mulch priming, search, draft review, and session-aware learning workflows.",

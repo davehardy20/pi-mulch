@@ -30,7 +30,7 @@ Pi package for Mulch-aware priming, search, status, and draft review workflows.
 From a local checkout:
 
 ```bash
-pi install /absolute/path/to/packages/pi-mulch-integration
+pi install git:github.com/davehardy20/pi-mulch
 ```
 
 Or for one run only:
