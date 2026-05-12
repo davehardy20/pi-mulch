@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "createdAt": "2026-05-12T20:52:42.484Z",
+  "repoRoot": "/Users/dave/tools/pi-mulch",
+  "linterStatus": "clean",
+  "lastUserPrompt": "yes expand the main *-plan.md file too",
+  "touchedFiles": [
+    ".git/FETCH_HEAD",
+    ".git/refs/heads/main",
+    ".git/refs/remotes/origin/main",
+    ".gitattributes",
+    ".gitignore",
+    ".mulch/README.md",
+    ".mulch/mulch.config.yaml",
+    ".seeds",
+    "README.md",
+    "agent/state/work-state.json",
+    "package.json",
+    "src/draft.ts",
+    "src/index.ts",
+    "test/index.test.ts"
+  ],
+  "learn": {
+    "success": true,
+    "command": "learn",
+    "changedFiles": [
+      ".mulch/expertise/orchestration.jsonl"
+    ],
+    "suggestedDomains": [],
+    "unmatchedFiles": [
+      ".mulch/expertise/orchestration.jsonl"
+    ]
+  },
+  "records": [],
+  "appliedAt": "2026-05-12T20:55:36.802Z",
+  "applyResults": []
+}
