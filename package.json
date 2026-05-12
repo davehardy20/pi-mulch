@@ -1,0 +1,52 @@
+{
+  "name": "pi-mulch",
+  "version": "0.1.0",
+  "description": "Pi-native Mulch integration extension for expertise context management",
+  "type": "module",
+  "main": "./src/index.ts",
+  "keywords": [
+    "pi-package",
+    "mulch",
+    "expertise",
+    "context",
+    "knowledge-management",
+    "ai-coding"
+  ],
+  "files": [
+    "src/",
+    "types/",
+    "examples/",
+    "README.md"
+  ],
+  "author": "Dave Hardy",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typebox": "^1.1.24",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  }
+}

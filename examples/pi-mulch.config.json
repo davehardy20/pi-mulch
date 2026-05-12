@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "command": "mulch",
+  "injectionMode": "auto",
+  "injectionBudget": 6000,
+  "suppressInitPrompt": true,
+  "draftMode": "manual",
+  "autoLearnDomains": ["architecture", "typescript", "testing"]
+}
