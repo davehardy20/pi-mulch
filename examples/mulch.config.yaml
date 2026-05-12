@@ -1,0 +1,39 @@
+# pi-mulch project-local configuration
+# ─────────────────────────────────────
+# Place this file at .mulch/mulch.config.yaml in your project root.
+# Settings here override global ~/.pi/agent/settings.json "mulch" key.
+#
+# Only the "pi:" section is read; everything else is standard Mulch config.
+
+pi:
+  # Enable or disable the pi-mulch extension for this project
+  enabled: true
+
+  # Mulch CLI command: "mulch", "ml", or an absolute path
+  command: mulch
+
+  # How context is injected at agent start:
+  #   manifest  – first-turn only, runs "mulch prime --manifest"
+  #   prime     – full prime every turn (deduped by hash)
+  #   auto      – manifest first, then file-scoped once touched files exist
+  injectionMode: auto
+
+  # Approximate token budget for priming output (100–100,000)
+  injectionBudget: 6000
+
+  # If true, never offer "mulch init" interactively.
+  # You can still run /mulch-init manually.
+  suppressInitPrompt: false
+
+  # Draft generation at session end:
+  #   auto    – generate drafts when linter reports clean
+  #   manual  – no auto-generation; use /mulch-review after manual drafts
+  #   off     – disable draft workflow entirely
+  draftMode: manual
+
+  # Fallback domains when "mulch learn" doesn't return suggestions.
+  # Only used when draftMode is "auto".
+  autoLearnDomains:
+    - architecture
+    - typescript
+    - testing

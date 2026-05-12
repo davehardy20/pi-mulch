@@ -1,333 +1,314 @@
 /**
- * pi-mulch — Pi-native Mulch integration extension.
+ * Pi-native Mulch integration extension
  *
- * Features:
  * - Detects Mulch CLI and .mulch/ on session start
- * - Offers `mulch init` once per repo/session if .mulch/ is missing
- * - Injects Mulch context in `before_agent_start` via hidden custom messages
- * - Tracks touched files for file-scoped priming
- * - Exposes LLM-callable Mulch read/query tools
+ * - Offers mulch init once per repo/session if missing
+ * - Injects Mulch context in before_agent_start via hidden custom messages
+ * - Tracks touched files from relevant tool events
+ * - Exposes safe Mulch read/query tools and user commands
  * - Generates end-of-session draft records after post-turn-linter is clean
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadMulchConfig } from "./config.js";
-import { detectMulch, isMulchInstalled, isInitSuppressed } from "./detect.js";
-import { runMulch } from "./exec.js";
-import { createState, resetState, suppressInitForRepo } from "./state.js";
-import { computePriming, markPrimingInjected, buildPrimeMessage } from "./prime.js";
-import { detectTouchedFilesFromToolEvent, detectTouchedFilesFromToolResult, getTouchedFilesRelative } from "./paths.js";
-import { registerMulchTools } from "./tools.js";
-import { generateDrafts, listDrafts, getDraft, deleteDraft, applyDraft, markDraftApplied } from "./draft.js";
-import type { PiMulchConfig, MulchDetection, MulchSessionState } from "./types.js";
+import type { PiMulchConfig, MulchState, MulchDetection } from "./types.js";
+import { loadConfig, isInitDeclined, setInitDeclined } from "./config.js";
+import { detectMulch } from "./detect.js";
+import { createState } from "./state.js";
+import {
+  detectTouchedFilesFromToolEvent,
+  detectTouchedFilesFromToolResult,
+} from "./paths.js";
+import {
+  getManifestPrime,
+  getScopedPrime,
+  buildPrimeMessage,
+} from "./prime.js";
+import { generateDrafts } from "./draft.js";
+import { registerMulchTools, registerMulchCommands } from "./tools.js";
 
-export default function piMulch(pi: ExtensionAPI) {
+// Minimal type stubs for the Pi extension API — the real types come from
+// the pi-coding-agent package at runtime.
+interface ExtensionAPI {
+  on(event: string, handler: (...args: unknown[]) => void | Promise<void>): void;
+  sendMessage(msg: unknown, opts?: unknown): void;
+  sendUserMessage(msg: string, opts?: unknown): void;
+  registerTool(tool: unknown): void;
+  registerCommand(name: string, opts: unknown): void;
+}
+
+interface ExtensionContext {
+  cwd: string;
+  hasUI: boolean;
+  signal?: AbortSignal;
+  ui: {
+    notify(msg: string, level: string): void;
+    confirm(title: string, message: string): Promise<boolean>;
+  };
+  sessionManager: {
+    getBranch(): unknown[];
+  };
+}
+
+interface SessionStartEvent {
+  reason: string;
+}
+
+interface ToolEvent {
+  toolName: string;
+  args?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+}
+
+export default function piMulchExtension(pi: ExtensionAPI) {
+  let config: PiMulchConfig = loadConfig(process.cwd());
+  let state: MulchState = createState();
   let detection: MulchDetection | null = null;
-  let config: PiMulchConfig = loadMulchConfig(process.cwd(), null);
-  let state: MulchSessionState = createState();
+  let registered = false;
 
-  const getDetection = () => detection;
-  const getConfig = () => config;
-  const getState = () => state;
+  function effectiveCommand(): string {
+    return detection?.cliCommand ?? config.command;
+  }
 
-  // Register LLM-callable tools
-  registerMulchTools(
-    (def: unknown) => pi.registerTool(def as Parameters<typeof pi.registerTool>[0]),
-    getDetection,
-    getConfig,
-    getState,
-  );
+  async function maybeOfferInit(ctx: ExtensionContext) {
+    if (!detection?.cliAvailable) return;
+    if (detection.dotMulchExists) return;
+    if (state.initOffered) return;
+    if (state.initDeclined) return;
 
-  // ─── session_start ───────────────────────────────────────
-  pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
-    const cwd = ctx.cwd ?? process.cwd();
+    state.initOffered = true;
 
+    if (config.suppressInitPrompt) {
+      const declined = isInitDeclined(ctx.cwd);
+      if (declined) {
+        state.initDeclined = true;
+        return;
+      }
+    }
+
+    if (!ctx.hasUI) return;
+
+    const ok = await ctx.ui.confirm(
+      "Initialize Mulch?",
+      "No .mulch/ directory found. Run `mulch init` to set up expertise tracking?",
+    );
+
+    if (ok) {
+      pi.sendUserMessage("/mulch-init", { deliverAs: "followUp" });
+    } else {
+      state.initDeclined = true;
+      if (config.suppressInitPrompt) {
+        setInitDeclined(ctx.cwd, true);
+      }
+    }
+  }
+
+  async function injectPrime(
+    ctx: ExtensionContext,
+    signal?: AbortSignal,
+  ) {
+    if (!detection?.cliAvailable || !detection.dotMulchExists) return;
+
+    const command = effectiveCommand();
+
+    let primeResult: {
+      content: string;
+      hash: string;
+      mode: "manifest" | "scoped";
+    } | null = null;
+
+    if (!state.primedOnce) {
+      // First turn: manifest priming
+      primeResult = await getManifestPrime(command, ctx.cwd);
+      state.primedOnce = true;
+    } else if (state.touchedFiles.size > 0) {
+      // Subsequent turns with touched files: file-scoped priming
+      const files = Array.from(state.touchedFiles);
+      state.touchedFiles.clear();
+
+      primeResult = await getScopedPrime(
+        command,
+        files,
+        ctx.cwd,
+        config,
+      );
+    }
+
+    if (!primeResult) return;
+
+    // Deduplicate repeated injections
+    if (primeResult.hash === state.lastPrimeHash) return;
+    state.lastPrimeHash = primeResult.hash;
+
+    const message = buildPrimeMessage(primeResult);
+
+    pi.sendMessage(
+      {
+        customType: "pi-mulch-context",
+        content: message,
+        display: false,
+      },
+      { deliverAs: "steer" },
+    );
+  }
+
+  function updateLinterStatus(ctx: ExtensionContext) {
+    const branch = ctx.sessionManager.getBranch();
+    // Scan backwards for the most recent post-turn-linter-status entry
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const entry = branch[i] as Record<string, unknown> | undefined;
+      if (!entry) continue;
+      if (
+        entry.type === "custom_message" &&
+        entry.customType === "post-turn-linter-status"
+      ) {
+        const details = entry.details as
+          | { status?: string }
+          | undefined;
+        if (details?.status === "clean") {
+          state.lastLinterStatus = "clean";
+        } else {
+          state.lastLinterStatus = "dirty";
+        }
+        return;
+      }
+    }
+  }
+
+  pi.on("session_start", async (event: unknown, ctx: unknown) => {
+    const e = event as SessionStartEvent;
+    const c = ctx as ExtensionContext;
+    config = loadConfig(c.cwd);
     state = createState();
-    config = loadMulchConfig(cwd, null);
 
     if (!config.enabled) return;
 
-    detection = await detectMulch(cwd, config.command);
+    detection = await detectMulch(c.cwd, config.command);
+    state.initDeclined = isInitDeclined(c.cwd);
 
-    if (!detection.cliAvailable) {
-      if (ctx.hasUI) ctx.ui.setStatus("mulch", "not available");
-      return;
+    if (detection.cliAvailable && detection.dotMulchExists) {
+      if (c.hasUI) {
+        c.ui.notify(
+          `🌱 Mulch detected (${detection.version || detection.cliCommand})`,
+          "info",
+        );
+      }
     }
 
-    if (ctx.hasUI) {
-      ctx.ui.setStatus(
-        "mulch",
-        detection.mulchDirExists
-          ? `${detection.cliCommand} ${detection.version} ✓`
-          : `${detection.cliCommand} ${detection.version} (no .mulch/)`,
+    // Offer init if .mulch/ is missing
+    if (
+      e.reason === "startup" ||
+      e.reason === "new" ||
+      e.reason === "resume"
+    ) {
+      await maybeOfferInit(c);
+    }
+
+    // Register tools and commands once per session
+    if (!registered) {
+      registered = true;
+      registerMulchTools(
+        { registerTool: (tool) => pi.registerTool(tool) },
+        config,
+        state,
+      );
+      registerMulchCommands(
+        {
+          registerCommand: (name, opts) =>
+            pi.registerCommand(name, opts),
+        },
+        config,
+        state,
       );
     }
-
-    // Offer mulch init if .mulch/ is missing and not suppressed
-    if (!detection.mulchDirExists && !config.suppressInitPrompt) {
-      const suppressed = isInitSuppressed(detection.repoRoot);
-      if (!suppressed && !state.initOffered) {
-        state.initOffered = true;
-        setTimeout(async () => {
-          if (!ctx.hasUI) return;
-          const answer = await ctx.ui.select(
-            "Mulch detected but no .mulch/ directory found.",
-            [
-              "Run mulch init",
-              "Skip for now",
-              "Don't ask again for this repo",
-            ],
-          );
-          if (answer === "Run mulch init") {
-            const result = await runMulch(detection!.cliCommand, ["init"], detection!.repoRoot);
-            if (result.code === 0) {
-              ctx.ui.notify("Mulch initialized!", "success");
-              detection = await detectMulch(cwd, config.command);
-              if (ctx.hasUI) ctx.ui.setStatus("mulch", `${detection?.cliCommand} ${detection?.version} ✓`);
-            } else {
-              ctx.ui.notify(`mulch init failed: ${result.stderr || result.stdout}`, "error");
-            }
-          } else if (answer === "Don't ask again for this repo") {
-            suppressInitForRepo(detection!.repoRoot);
-            ctx.ui.notify("Mulch init prompt suppressed for this repo.", "info");
-          }
-        }, 1000);
-      }
-    }
   });
 
-  // ─── session_shutdown ────────────────────────────────────
-  pi.on("session_shutdown", async (_event: unknown, ctx: ExtensionContext) => {
-    if (detection?.mulchDirExists && state.touchedFiles.size > 0 && config.enabled) {
-      if (state.lastLinterStatus === "clean" || state.lastLinterStatus === "unknown") {
-        try {
-          const touchedFiles = getTouchedFilesRelative(state, detection.repoRoot);
-          const drafts = await generateDrafts(detection.cliCommand, touchedFiles, detection.repoRoot, config);
-          if (drafts.length > 0 && ctx.hasUI) {
-            ctx.ui.notify(`Generated ${drafts.length} Mulch draft(s). Use /mulch-review to inspect.`, "info");
-          }
-        } catch {
-          // Best-effort
-        }
-      }
-    }
+  pi.on("before_agent_start", async (_event: unknown, ctx: unknown) => {
+    if (!config.enabled) return;
+    if (!detection?.cliAvailable || !detection.dotMulchExists) return;
 
-    resetState(state);
-    detection = null;
-    if (ctx.hasUI) ctx.ui.setStatus("mulch", undefined);
+    const c = ctx as ExtensionContext;
+    await injectPrime(c, c.signal);
   });
 
-  // ─── before_agent_start ──────────────────────────────────
-  pi.on("before_agent_start", async (_event: unknown, ctx: ExtensionContext) => {
-    if (!detection?.mulchDirExists || !detection.cliAvailable || !config.enabled) return;
-
-    const prime = await computePriming(
-      detection.cliCommand,
-      detection.repoRoot,
-      config,
-      state,
-      ctx.signal,
+  pi.on("tool_execution_start", async (event: unknown, ctx: unknown) => {
+    if (!config.enabled) return;
+    const e = event as ToolEvent;
+    const c = ctx as ExtensionContext;
+    const files = detectTouchedFilesFromToolEvent(
+      { toolName: e.toolName, args: e.args },
+      c.cwd,
     );
-    if (!prime) return;
-
-    markPrimingInjected(state, prime.hash);
-
-    const messageContent = buildPrimeMessage(prime);
-    pi.sendMessage({
-      customType: "mulch-priming",
-      content: messageContent,
-      display: false,
-      details: { mode: prime.mode },
-    });
-  });
-
-  // ─── tool_execution_end — touched file tracking ─────────
-  pi.on("tool_execution_end", async (event: { toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; result?: Record<string, unknown>; isError?: boolean }, _ctx: ExtensionContext) => {
-    if (!detection || !config.enabled) return;
-    if (event.isError) return;
-
-    // Track from tool call args
-    const filesFromEvent = detectTouchedFilesFromToolEvent(
-      { toolName: event.toolName, args: event.args ?? event.input },
-      detection.repoRoot,
-    );
-    for (const f of filesFromEvent) state.touchedFiles.add(f);
-
-    // Track from tool result
-    const filesFromResult = detectTouchedFilesFromToolResult(
-      { toolName: event.toolName, result: event.result },
-      detection.repoRoot,
-    );
-    if (filesFromResult) {
-      for (const f of filesFromResult) state.touchedFiles.add(f);
+    for (const f of files) {
+      state.touchedFiles.add(f);
     }
   });
 
-  // ─── User commands ───────────────────────────────────────
-
-  pi.registerCommand("mulch-init", {
-    description: "Initialize Mulch in the current project",
-    handler: async (_args: string | undefined, ctx: ExtensionContext) => {
-      if (!detection?.cliAvailable) {
-        ctx.ui.notify("Mulch CLI not found.", "error");
-        return;
-      }
-      if (detection.mulchDirExists) {
-        ctx.ui.notify("Mulch is already initialized.", "info");
-        return;
-      }
-
-      const result = await runMulch(detection.cliCommand, ["init"], detection.repoRoot);
-      if (result.code === 0) {
-        ctx.ui.notify("Mulch initialized!", "success");
-        detection = await detectMulch(ctx.cwd, config.command);
-      } else {
-        ctx.ui.notify(`mulch init failed: ${result.stderr || result.stdout}`, "error");
-      }
-    },
-  });
-
-  pi.registerCommand("mulch-prime", {
-    description: "Run mulch prime and show output",
-    handler: async (args: string | undefined, ctx: ExtensionContext) => {
-      if (!detection?.mulchDirExists) {
-        ctx.ui.notify("Mulch not available or not initialized.", "error");
-        return;
-      }
-
-      const parsedArgs = (args || "").trim().split(/\s+/).filter(Boolean);
-      const result = await runMulch(detection.cliCommand, ["prime", ...parsedArgs], detection.repoRoot);
-
-      if (result.code === 0) {
-        ctx.ui.notify(result.stdout || "(no output)", "info");
-      } else {
-        ctx.ui.notify(`mulch prime failed: ${result.stderr || result.stdout}`, "error");
-      }
-    },
-  });
-
-  pi.registerCommand("mulch-search", {
-    description: "Search Mulch expertise records",
-    handler: async (args: string | undefined, ctx: ExtensionContext) => {
-      if (!detection?.mulchDirExists) {
-        ctx.ui.notify("Mulch not available or not initialized.", "error");
-        return;
-      }
-
-      const query = (args || "").trim();
-      const cliArgs = query ? ["search", query] : ["search"];
-      const result = await runMulch(detection.cliCommand, cliArgs, detection.repoRoot);
-
-      if (result.code === 0) {
-        ctx.ui.notify(result.stdout || "(no results)", "info");
-      } else {
-        ctx.ui.notify(`mulch search failed: ${result.stderr || result.stdout}`, "error");
-      }
-    },
-  });
-
-  pi.registerCommand("mulch-status", {
-    description: "Show Mulch status",
-    handler: async (_args: string | undefined, ctx: ExtensionContext) => {
-      if (!detection?.mulchDirExists) {
-        ctx.ui.notify("Mulch not available or not initialized.", "error");
-        return;
-      }
-
-      const result = await runMulch(detection.cliCommand, ["status"], detection.repoRoot);
-      if (result.code === 0) {
-        ctx.ui.notify(result.stdout || "(no output)", "info");
-      } else {
-        ctx.ui.notify(`mulch status failed: ${result.stderr || result.stdout}`, "error");
-      }
-    },
-  });
-
-  pi.registerCommand("mulch-review", {
-    description: "Review pending Mulch draft records",
-    handler: async (_args: string | undefined, ctx: ExtensionContext) => {
-      if (!detection?.mulchDirExists) {
-        ctx.ui.notify("Mulch not available or not initialized.", "error");
-        return;
-      }
-
-      const drafts = listDrafts(detection.repoRoot);
-      if (drafts.length === 0) {
-        ctx.ui.notify("No pending Mulch drafts.", "info");
-        return;
-      }
-
-      const options = drafts.map((d) =>
-        `[${d.type}] ${d.domain}: ${d.content.slice(0, 80)}${d.content.length > 80 ? "…" : ""}`,
+  pi.on("tool_execution_end", async (event: unknown, ctx: unknown) => {
+    if (!config.enabled) return;
+    const e = event as ToolEvent;
+    const c = ctx as ExtensionContext;
+    const resultFiles = detectTouchedFilesFromToolResult(
+      { toolName: e.toolName, result: e.result },
+      c.cwd,
+    );
+    const files = resultFiles ??
+      detectTouchedFilesFromToolEvent(
+        { toolName: e.toolName, args: e.args },
+        c.cwd,
       );
-
-      const selectedIdx = await ctx.ui.select(
-        `Mulch drafts (${drafts.length}). Select to review:`,
-        options,
-      );
-      if (!selectedIdx) return;
-
-      const idx = options.indexOf(selectedIdx);
-      if (idx === -1) return;
-      const draft = drafts[idx];
-
-      const action = await ctx.ui.select(
-        `Draft: ${draft.id}\nDomain: ${draft.domain}\nType: ${draft.type}\nContent:\n${draft.content}`,
-        ["Apply this draft", "Discard this draft", "Cancel"],
-      );
-
-      if (action === "Apply this draft") {
-        const result = await applyDraft(detection.cliCommand, draft, detection.repoRoot);
-        if (result.success) {
-          markDraftApplied(detection.repoRoot, draft.id);
-          ctx.ui.notify(result.output, "success");
-        } else {
-          ctx.ui.notify(result.output, "error");
-        }
-      } else if (action === "Discard this draft") {
-        deleteDraft(detection.repoRoot, draft.id);
-        ctx.ui.notify("Draft discarded.", "info");
-      }
-    },
+    for (const f of files) {
+      state.touchedFiles.add(f);
+    }
   });
 
-  pi.registerCommand("mulch-apply", {
-    description: "Apply a Mulch draft record (with review confirmation)",
-    handler: async (args: string | undefined, ctx: ExtensionContext) => {
-      if (!detection?.mulchDirExists) {
-        ctx.ui.notify("Mulch not available or not initialized.", "error");
-        return;
-      }
+  pi.on("turn_end", async (_event: unknown, ctx: unknown) => {
+    if (!config.enabled) return;
+    const c = ctx as ExtensionContext;
+    updateLinterStatus(c);
+  });
 
-      const draftId = (args || "").trim();
-      if (!draftId) {
-        ctx.ui.notify("Usage: /mulch-apply <draft-id>", "info");
-        return;
-      }
+  pi.on("agent_end", async (_event: unknown, ctx: unknown) => {
+    if (!config.enabled) return;
+    if (config.draftMode === "off") return;
+    if (state.draftInProgress) return;
 
-      const draft = getDraft(detection.repoRoot, draftId);
-      if (!draft) {
-        ctx.ui.notify(`Draft '${draftId}' not found.`, "error");
-        return;
-      }
+    // Only auto-generate drafts after linter is clean
+    if (state.lastLinterStatus !== "clean") return;
 
-      const confirmed = await ctx.ui.confirm(
-        `Apply Mulch draft?`,
-        `Domain: ${draft.domain}\nType: ${draft.type}\nContent:\n${draft.content}`,
+    const filesToDraft = Array.from(state.touchedFiles);
+    if (filesToDraft.length === 0) return;
+
+    state.touchedFiles.clear();
+    state.draftInProgress = true;
+
+    const c = ctx as ExtensionContext;
+
+    try {
+      const command = effectiveCommand();
+      const drafts = await generateDrafts(
+        command,
+        filesToDraft,
+        c.cwd,
+        config,
       );
-
-      if (!confirmed) {
-        ctx.ui.notify("Draft apply cancelled.", "info");
-        return;
+      if (drafts.length > 0 && c.hasUI) {
+        c.ui.notify(
+          `🌱 Generated ${drafts.length} Mulch draft(s). Run /mulch-review to see them.`,
+          "info",
+        );
       }
-
-      const result = await applyDraft(detection.cliCommand, draft, detection.repoRoot);
-      if (result.success) {
-        markDraftApplied(detection.repoRoot, draft.id);
-        ctx.ui.notify(result.output, "success");
-      } else {
-        ctx.ui.notify(result.output, "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (c.hasUI) {
+        c.ui.notify(`Mulch draft generation failed: ${msg}`, "error");
       }
-    },
+    } finally {
+      state.draftInProgress = false;
+      state.lastLinterStatus = "unknown";
+    }
+  });
+
+  pi.on("session_shutdown", async () => {
+    // No-op: drafts are already persisted to disk
+    registered = false;
   });
 }

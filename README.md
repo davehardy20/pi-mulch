@@ -30,29 +30,78 @@ npm install
 
 ## Configuration
 
-Create `.pi/pi-mulch.config.json` in your project root or `~/.pi/agent/pi-mulch.config.json` globally:
+Configuration loads from three layers (later overrides earlier):
+
+1. **Built-in defaults** — no file needed for basic usage
+2. **Global settings** — `~/.pi/agent/settings.json` under a `"mulch": { ... }` key
+3. **Project-local YAML** — `.mulch/mulch.config.yaml` under a `pi:` section
+
+### Quick config (global)
+
+Add to `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "enabled": true,
-  "command": "mulch",
-  "injectionMode": "manifest",
-  "injectionBudget": 4000,
-  "suppressInitPrompt": true,
-  "draftMode": "auto",
-  "autoLearnDomains": ["general"]
+  "mulch": {
+    "enabled": true,
+    "command": "mulch"
+  }
 }
 ```
 
-| Option | Description |
-|--------|-------------|
-| `enabled` | Enable/disable the extension |
-| `command` | Mulch CLI command: `mulch`, `ml`, or custom path |
-| `injectionMode` | `manifest`, `prime`, or `auto` |
-| `injectionBudget` | Max estimated tokens for prime output |
-| `suppressInitPrompt` | Persist decline across sessions (repo-local) |
-| `draftMode` | `auto`, `manual`, or `off` |
-| `autoLearnDomains` | Default domains for draft generation |
+### Project-local config (YAML)
+
+Create `.mulch/mulch.config.yaml` in your project root:
+
+```yaml
+pi:
+  enabled: true
+  injectionMode: auto
+  injectionBudget: 6000
+  draftMode: manual
+  autoLearnDomains:
+    - architecture
+    - typescript
+```
+
+### Option Reference
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension |
+| `command` | `string` | `"mulch"` | Mulch CLI command: `mulch`, `ml`, or custom path |
+| `injectionMode` | `"manifest" \| "prime" \| "auto"` | `"manifest"` | How context is injected at agent start |
+| `injectionBudget` | `number` | `4000` | Max estimated tokens for prime output |
+| `suppressInitPrompt` | `boolean` | `false` | Persist decline across sessions (repo-local) |
+| `draftMode` | `"auto" \| "manual" \| "off"` | `"auto"` | Whether to auto-generate end-of-session drafts |
+| `autoLearnDomains` | `string[]` | `[]` | Default domains for draft generation |
+
+### injectionMode
+
+- **`manifest`** — First turn only; runs `mulch prime --manifest`. Minimal overhead.
+- **`prime`** — Full `mulch prime` every turn (deduped by content hash).
+- **`auto`** — Manifest on first turn, then file-scoped priming once touched files are tracked.
+
+### draftMode
+
+- **`auto`** — Generates drafts at session end when linter reports clean.
+- **`manual`** — No auto-generation. Use `mulch record` directly or `/mulch-review`.
+- **`off`** — Disable draft workflow entirely.
+
+### Example Configs
+
+The [`examples/`](examples/) directory contains ready-to-use configurations:
+
+| File | Use case |
+|------|----------|
+| `pi-mulch.config.minimal.json` | Just enable Mulch and go |
+| `pi-mulch.config.json` | Recommended general-purpose config |
+| `pi-mulch.config.full.json` | Every option with inline docs |
+| `pi-mulch.config.manual-drafts.json` | No auto-drafts; review only |
+| `pi-mulch.config.disabled.json` | Disable without uninstalling |
+| `mulch.config.yaml` | Project-local YAML example |
+
+See [`examples/README.md`](examples/README.md) for full details.
 
 ## Usage
 
