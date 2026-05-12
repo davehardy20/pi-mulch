@@ -3,37 +3,37 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export interface MulchDetectionResult {
-  cliAvailable: boolean;
-  cliCommand: string | null;
-  directoryExists: boolean;
-  directoryPath: string;
-  /** True when the detected root is a git worktree (linked .git file). */
-  isWorktree: boolean;
-  /**
-   * The main working tree root when inside a worktree, or the parent
-   * repo root when inside a submodule. `null` when not applicable.
-   */
-  mainWorktreeRoot: string | null;
-  isGitRepo: boolean;
-  gitRepoRoot: string | null;
-  /**
-   * The working directory to use when invoking mulch CLI commands.
-   * Normally equals `gitRepoRoot`, but when `.mulch/` was found in the
-   * main worktree, this is set to `mainWorktreeRoot` so that the CLI
-   * resolves `.mulch/` correctly.
-   */
-  commandCwd: string;
-  ready: boolean;
+	cliAvailable: boolean;
+	cliCommand: string | null;
+	directoryExists: boolean;
+	directoryPath: string;
+	/** True when the detected root is a git worktree (linked .git file). */
+	isWorktree: boolean;
+	/**
+	 * The main working tree root when inside a worktree, or the parent
+	 * repo root when inside a submodule. `null` when not applicable.
+	 */
+	mainWorktreeRoot: string | null;
+	isGitRepo: boolean;
+	gitRepoRoot: string | null;
+	/**
+	 * The working directory to use when invoking mulch CLI commands.
+	 * Normally equals `gitRepoRoot`, but when `.mulch/` was found in the
+	 * main worktree, this is set to `mainWorktreeRoot` so that the CLI
+	 * resolves `.mulch/` correctly.
+	 */
+	commandCwd: string;
+	ready: boolean;
 }
 
 export interface DetectDeps {
-  statSync?: typeof fs.statSync;
-  execFileSync?: typeof childProcess.execFileSync;
+	statSync?: typeof fs.statSync;
+	execFileSync?: typeof childProcess.execFileSync;
 }
 
 export interface DetectOptions {
-  command?: string | null;
-  cliCandidates?: readonly string[];
+	command?: string | null;
+	cliCandidates?: readonly string[];
 }
 
 /**
@@ -47,55 +47,55 @@ export interface DetectOptions {
 const DEFAULT_CLI_CANDIDATES = ["mulch", "ml"] as const;
 
 export function detectMulch(
-  cwd: string,
-  options: DetectOptions = {},
-  deps: DetectDeps = {},
+	cwd: string,
+	options: DetectOptions = {},
+	deps: DetectDeps = {},
 ): MulchDetectionResult {
-  const statSync = deps.statSync ?? fs.statSync;
-  const execFileSync = deps.execFileSync ?? childProcess.execFileSync;
+	const statSync = deps.statSync ?? fs.statSync;
+	const execFileSync = deps.execFileSync ?? childProcess.execFileSync;
 
-  const gitRepoRoot = findGitRepoRoot(cwd, execFileSync);
-  const isGitRepo = gitRepoRoot !== null;
-  const repoRoot = gitRepoRoot ?? cwd;
+	const gitRepoRoot = findGitRepoRoot(cwd, execFileSync);
+	const isGitRepo = gitRepoRoot !== null;
+	const repoRoot = gitRepoRoot ?? cwd;
 
-  // Detect worktree: the main working tree root is derived from
-  // --git-common-dir which points to the primary .git directory.
-  const { isWorktree, mainWorktreeRoot } = resolveWorktreeInfo(
-    repoRoot,
-    execFileSync,
-  );
+	// Detect worktree: the main working tree root is derived from
+	// --git-common-dir which points to the primary .git directory.
+	const { isWorktree, mainWorktreeRoot } = resolveWorktreeInfo(
+		repoRoot,
+		execFileSync,
+	);
 
-  // Resolve .mulch/ in the detected repo root first.
-  // If not found and we are in a worktree, fall back to the main
-  // working tree so a shared .mulch/ is discovered.
-  let directoryPath = path.resolve(repoRoot, ".mulch");
-  let directoryExists = isDirectory(directoryPath, statSync);
-  let commandCwd = repoRoot;
+	// Resolve .mulch/ in the detected repo root first.
+	// If not found and we are in a worktree, fall back to the main
+	// working tree so a shared .mulch/ is discovered.
+	let directoryPath = path.resolve(repoRoot, ".mulch");
+	let directoryExists = isDirectory(directoryPath, statSync);
+	let commandCwd = repoRoot;
 
-  if (!directoryExists && isWorktree && mainWorktreeRoot) {
-    const mainMulchPath = path.resolve(mainWorktreeRoot, ".mulch");
-    if (isDirectory(mainMulchPath, statSync)) {
-      directoryPath = mainMulchPath;
-      directoryExists = true;
-      commandCwd = mainWorktreeRoot;
-    }
-  }
+	if (!directoryExists && isWorktree && mainWorktreeRoot) {
+		const mainMulchPath = path.resolve(mainWorktreeRoot, ".mulch");
+		if (isDirectory(mainMulchPath, statSync)) {
+			directoryPath = mainMulchPath;
+			directoryExists = true;
+			commandCwd = mainWorktreeRoot;
+		}
+	}
 
-  const cliCommand = resolveCliCommand(options, execFileSync);
-  const cliAvailable = cliCommand !== null;
+	const cliCommand = resolveCliCommand(options, execFileSync);
+	const cliAvailable = cliCommand !== null;
 
-  return {
-    cliAvailable,
-    cliCommand,
-    directoryExists,
-    directoryPath,
-    isWorktree,
-    mainWorktreeRoot,
-    isGitRepo,
-    gitRepoRoot,
-    commandCwd,
-    ready: cliAvailable && directoryExists,
-  };
+	return {
+		cliAvailable,
+		cliCommand,
+		directoryExists,
+		directoryPath,
+		isWorktree,
+		mainWorktreeRoot,
+		isGitRepo,
+		gitRepoRoot,
+		commandCwd,
+		ready: cliAvailable && directoryExists,
+	};
 }
 
 /**
@@ -108,57 +108,57 @@ export function detectMulch(
  * The first candidate that succeeds becomes `cliCommand` for the session.
  */
 function resolveCliCommand(
-  options: DetectOptions,
-  execFileSync: typeof childProcess.execFileSync,
+	options: DetectOptions,
+	execFileSync: typeof childProcess.execFileSync,
 ): string | null {
-  const candidates = [
-    ...(typeof options.command === "string" && options.command.trim().length > 0
-      ? [options.command.trim()]
-      : []),
-    ...(options.cliCandidates ?? DEFAULT_CLI_CANDIDATES),
-  ];
+	const candidates = [
+		...(typeof options.command === "string" && options.command.trim().length > 0
+			? [options.command.trim()]
+			: []),
+		...(options.cliCandidates ?? DEFAULT_CLI_CANDIDATES),
+	];
 
-  for (const candidate of new Set(candidates)) {
-    try {
-      execFileSync(candidate, ["--version"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      return candidate;
-    } catch {
-      // try next candidate
-    }
-  }
+	for (const candidate of new Set(candidates)) {
+		try {
+			execFileSync(candidate, ["--version"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			return candidate;
+		} catch {
+			// try next candidate
+		}
+	}
 
-  return null;
+	return null;
 }
 
 function isDirectory(
-  directoryPath: string,
-  statSync: typeof fs.statSync,
+	directoryPath: string,
+	statSync: typeof fs.statSync,
 ): boolean {
-  try {
-    return statSync(directoryPath).isDirectory();
-  } catch {
-    return false;
-  }
+	try {
+		return statSync(directoryPath).isDirectory();
+	} catch {
+		return false;
+	}
 }
 
 function findGitRepoRoot(
-  cwd: string,
-  execFileSync: typeof childProcess.execFileSync,
+	cwd: string,
+	execFileSync: typeof childProcess.execFileSync,
 ): string | null {
-  try {
-    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const trimmed = root.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  } catch {
-    return null;
-  }
+	try {
+		const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const trimmed = root.trim();
+		return trimmed.length > 0 ? trimmed : null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -174,31 +174,31 @@ function findGitRepoRoot(
  *    whether we are in a linked worktree and extract the main tree root.
  */
 function resolveWorktreeInfo(
-  repoRoot: string,
-  execFileSync: typeof childProcess.execFileSync,
+	repoRoot: string,
+	execFileSync: typeof childProcess.execFileSync,
 ): { isWorktree: boolean; mainWorktreeRoot: string | null } {
-  try {
-    const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
+	try {
+		const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+			cwd: repoRoot,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		}).trim();
 
-    if (!commonDir) {
-      return { isWorktree: false, mainWorktreeRoot: null };
-    }
+		if (!commonDir) {
+			return { isWorktree: false, mainWorktreeRoot: null };
+		}
 
-    // An absolute common-dir that doesn't live under repoRoot means
-    // we are in a linked worktree.
-    const absoluteCommonDir = path.resolve(repoRoot, commonDir);
-    if (!absoluteCommonDir.startsWith(repoRoot + path.sep)) {
-      // common-dir is like /main-repo/.git — parent is main worktree root
-      const mainRoot = path.dirname(absoluteCommonDir);
-      return { isWorktree: true, mainWorktreeRoot: mainRoot };
-    }
+		// An absolute common-dir that doesn't live under repoRoot means
+		// we are in a linked worktree.
+		const absoluteCommonDir = path.resolve(repoRoot, commonDir);
+		if (!absoluteCommonDir.startsWith(repoRoot + path.sep)) {
+			// common-dir is like /main-repo/.git — parent is main worktree root
+			const mainRoot = path.dirname(absoluteCommonDir);
+			return { isWorktree: true, mainWorktreeRoot: mainRoot };
+		}
 
-    return { isWorktree: false, mainWorktreeRoot: null };
-  } catch {
-    return { isWorktree: false, mainWorktreeRoot: null };
-  }
+		return { isWorktree: false, mainWorktreeRoot: null };
+	} catch {
+		return { isWorktree: false, mainWorktreeRoot: null };
+	}
 }
