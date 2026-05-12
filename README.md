@@ -72,6 +72,39 @@ Configure in `~/.pi/agent/settings.json` or `.pi/settings.json`:
 
 Top-level `mulch` settings are also supported.
 
+## Draft workflow
+
+The extension is designed to create **draft Mulch learnings at
+session end**. You should not need to run `ml learn` and `ml record
+...` just to get draft records created when `draftMode` is set to
+`"session-end"`.
+
+### Normal flow
+
+1. Pi session runs with the extension enabled.
+2. The extension injects Mulch context at `before_agent_start`.
+3. When `draftMode` is `"session-end"`, relevant files were touched,
+   and the post-turn-linter finished **cleanly**, the extension can
+   generate draft records at session end.
+4. Drafts are written to `.mulch/drafts/`.
+5. You review drafts with `/mulch-review`.
+6. You apply drafts with `/mulch-apply`.
+7. After applying drafts to real Mulch records, run `ml sync` to
+   validate and commit `.mulch/` changes.
+
+### Important distinction
+
+- **Automatic when enabled:** session-end draft generation into
+  `.mulch/drafts/`
+- **Manual review step:** `/mulch-review` and `/mulch-apply`
+- **Manual persistence/sync step:** `ml sync`
+
+### When to use `ml learn` and `ml record`
+
+Use `ml learn` and `ml record ...` when you want to create or curate
+Mulch records directly yourself, outside the extension's automatic
+draft workflow.
+
 ## Build and test
 
 ```bash
