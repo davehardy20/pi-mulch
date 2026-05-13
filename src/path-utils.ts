@@ -25,3 +25,29 @@ export function toRepoRelativePath(filePath: string, repoRoot: string): string {
 	const relative = path.relative(repoRoot, filePath).replace(/\\/g, "/");
 	return relative.length > 0 ? relative : ".";
 }
+
+export function isPathInsideRoot(
+	rootPath: string,
+	targetPath: string,
+): boolean {
+	const resolvedRoot = path.resolve(rootPath);
+	const resolvedTarget = path.resolve(targetPath);
+	const relative = path.relative(resolvedRoot, resolvedTarget);
+	return (
+		relative === "" ||
+		(!relative.startsWith("..") && !path.isAbsolute(relative))
+	);
+}
+
+export function resolvePathInsideRoot(
+	rootPath: string,
+	configuredPath: string,
+	fallbackPath: string,
+): string {
+	const resolvedRoot = path.resolve(rootPath);
+	const resolvedConfigured = path.resolve(resolvedRoot, configuredPath);
+	if (isPathInsideRoot(resolvedRoot, resolvedConfigured)) {
+		return resolvedConfigured;
+	}
+	return path.resolve(resolvedRoot, fallbackPath);
+}

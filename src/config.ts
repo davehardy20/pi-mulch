@@ -70,7 +70,7 @@ export function loadMulchConfig(
 
 	return normalizeMulchConfig({
 		...extractMulchSettings(globalSettings),
-		...extractMulchSettings(projectSettings),
+		...stripProjectOnlyUnsafeOverrides(extractMulchSettings(projectSettings)),
 	});
 }
 
@@ -173,6 +173,17 @@ function extractMulchSettings(
 		return settings.extensions.mulch;
 	}
 	return {};
+}
+
+function stripProjectOnlyUnsafeOverrides(
+	settings: Record<string, unknown>,
+): Record<string, unknown> {
+	const {
+		command: _command,
+		cliCandidates: _cliCandidates,
+		...safeSettings
+	} = settings;
+	return safeSettings;
 }
 
 function normalizeStringArray(value: unknown): string[] {

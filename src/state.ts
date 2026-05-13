@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { DEFAULT_MULCH_CONFIG } from "./config.js";
 import type { MulchDetectionResult } from "./detect.js";
+import { resolvePathInsideRoot } from "./path-utils.js";
 import { createTouchedFileTracker, type TouchedFileTracker } from "./paths.js";
 import type { MulchConfig, RepoInitState } from "./types.js";
 
@@ -56,7 +57,11 @@ export function getRepoInitStatePath(
 	repoRoot: string,
 	config: MulchConfig,
 ): string {
-	return path.resolve(repoRoot, config.initStateFile);
+	return resolvePathInsideRoot(
+		repoRoot,
+		config.initStateFile,
+		DEFAULT_MULCH_CONFIG.initStateFile,
+	);
 }
 
 export function loadRepoInitState(

@@ -2,9 +2,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MULCH_CONFIG } from "./config.js";
 import type { MulchDetectionResult } from "./detect.js";
 import { type RunMulchCommandDeps, runMulchCommand } from "./exec.js";
-import { toRepoRelativePath } from "./path-utils.js";
+import { resolvePathInsideRoot, toRepoRelativePath } from "./path-utils.js";
 import type {
 	MulchCommandResult,
 	MulchConfig,
@@ -97,7 +98,11 @@ export function writeDraftFile(
 ): string {
 	const mkdirSync = deps.mkdirSync ?? fs.mkdirSync;
 	const writeFileSync = deps.writeFileSync ?? fs.writeFileSync;
-	const draftDir = path.resolve(repoRoot, config.draftDir);
+	const draftDir = resolvePathInsideRoot(
+		repoRoot,
+		config.draftDir,
+		DEFAULT_MULCH_CONFIG.draftDir,
+	);
 	mkdirSync(draftDir, { recursive: true });
 
 	const stamp = draft.createdAt.replace(/[.:]/g, "-");
@@ -114,7 +119,11 @@ export function findLatestDraft(
 	const existsSync = deps.existsSync ?? fs.existsSync;
 	const readdirSync = deps.readdirSync ?? fs.readdirSync;
 	const statSync = deps.statSync ?? fs.statSync;
-	const draftDir = path.resolve(repoRoot, config.draftDir);
+	const draftDir = resolvePathInsideRoot(
+		repoRoot,
+		config.draftDir,
+		DEFAULT_MULCH_CONFIG.draftDir,
+	);
 	if (!existsSync(draftDir)) {
 		return null;
 	}

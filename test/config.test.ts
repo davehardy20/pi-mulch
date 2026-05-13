@@ -61,6 +61,7 @@ describe("loadMulchConfig", () => {
 			JSON.stringify({
 				mulch: {
 					enabled: false,
+					command: "mulch",
 					cliCandidates: ["mulch", "ml"],
 					primeBudget: 1234,
 				},
@@ -71,7 +72,8 @@ describe("loadMulchConfig", () => {
 			JSON.stringify({
 				mulch: {
 					enabled: true,
-					command: "ml",
+					command: "repo-local-cli",
+					cliCandidates: ["repo-local-cli"],
 					draftMode: "off",
 				},
 			}),
@@ -80,7 +82,7 @@ describe("loadMulchConfig", () => {
 		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual({
 			...DEFAULT_MULCH_CONFIG,
 			enabled: true,
-			command: "ml",
+			command: "mulch",
 			cliCandidates: ["mulch", "ml"],
 			primeBudget: 1234,
 			draftMode: "off",

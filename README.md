@@ -78,6 +78,13 @@ Use top-level `mulch` settings. Do **not** put this config under Pi's top-level
 `extensions` key, because Pi reserves `extensions` for extension file paths and
 package sources, not per-extension config.
 
+For safety:
+
+- `command` and `cliCandidates` are only honored from global Pi settings, not
+  repo-local `.pi/settings.json`
+- `draftDir` and `initStateFile` are always confined to the current repo root,
+  even if configured otherwise
+
 ## Draft workflow
 
 The extension is designed to create **draft Mulch learnings at

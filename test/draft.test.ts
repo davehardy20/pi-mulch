@@ -8,6 +8,7 @@ import {
 	getLatestLinterStatus,
 	loadDraftFile,
 	maybeWriteSessionDraft,
+	writeDraftFile,
 } from "../src/draft.js";
 import type { MulchDraftFile } from "../src/types.js";
 
@@ -471,5 +472,33 @@ describe("maybeWriteSessionDraft safety", () => {
 			},
 		);
 		expect(result).toBeNull();
+	});
+
+	it("keeps draft writes inside the repo when draftDir escapes", () => {
+		const repoRoot = makeTempDir();
+		const draft = {
+			version: 1 as const,
+			createdAt: new Date().toISOString(),
+			repoRoot,
+			linterStatus: "clean" as const,
+			lastUserPrompt: "ship it",
+			touchedFiles: ["src/index.ts"],
+			learn: {},
+			records: [],
+		};
+
+		const filePath = writeDraftFile(
+			repoRoot,
+			{ ...DEFAULT_MULCH_CONFIG, draftDir: "../outside-drafts" },
+			draft,
+		);
+
+		expect(filePath.startsWith(path.join(repoRoot, ".mulch", "drafts"))).toBe(
+			true,
+		);
+		expect(fs.existsSync(filePath)).toBe(true);
+		expect(fs.existsSync(path.resolve(repoRoot, "../outside-drafts"))).toBe(
+			false,
+		);
 	});
 });
