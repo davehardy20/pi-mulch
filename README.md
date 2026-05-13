@@ -1,4 +1,4 @@
-# pi-mulch-integration
+# @davehardy20/pi-mulch
 
 Pi package for Mulch-aware priming, search, status, and draft review workflows.
 
@@ -27,16 +27,22 @@ Pi package for Mulch-aware priming, search, status, and draft review workflows.
 
 ## Install
 
-From a local checkout:
+From npm:
 
 ```bash
-pi install git:github.com/davehardy20/pi-mulch
+pi install npm:@davehardy20/pi-mulch
 ```
 
-Or for one run only:
+For one run only:
 
 ```bash
-pi -e /absolute/path/to/packages/pi-mulch-integration
+pi -e npm:@davehardy20/pi-mulch
+```
+
+From a local checkout during development:
+
+```bash
+pi install /absolute/path/to/pi-mulch
 ```
 
 ## Settings
@@ -45,32 +51,32 @@ Configure in `~/.pi/agent/settings.json` or `.pi/settings.json`:
 
 ```json
 {
-  "extensions": {
-    "mulch": {
-      "enabled": true,
-      "command": null,
-      "cliCandidates": ["mulch", "ml"],
-      "injectionMode": "manifest",
-      "primeBudget": 4000,
-      "promptOnMissingInit": true,
-      "persistInitDecline": true,
-      "draftMode": "session-end",
-      "draftDir": ".mulch/drafts",
-      "initStateFile": ".pi/mulch-integration.json",
-      "maxTrackedFiles": 24,
-      "llmTools": [
-        "mulch_prime",
-        "mulch_search",
-        "mulch_query",
-        "mulch_learn",
-        "mulch_status"
-      ]
-    }
+  "mulch": {
+    "enabled": true,
+    "command": null,
+    "cliCandidates": ["mulch", "ml"],
+    "injectionMode": "manifest",
+    "primeBudget": 4000,
+    "promptOnMissingInit": true,
+    "persistInitDecline": true,
+    "draftMode": "session-end",
+    "draftDir": ".mulch/drafts",
+    "initStateFile": ".pi/mulch-integration.json",
+    "maxTrackedFiles": 24,
+    "llmTools": [
+      "mulch_prime",
+      "mulch_search",
+      "mulch_query",
+      "mulch_learn",
+      "mulch_status"
+    ]
   }
 }
 ```
 
-Top-level `mulch` settings are also supported.
+Use top-level `mulch` settings. Do **not** put this config under Pi's top-level
+`extensions` key, because Pi reserves `extensions` for extension file paths and
+package sources, not per-extension config.
 
 ## Draft workflow
 

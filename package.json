@@ -1,7 +1,6 @@
 {
-	"name": "pi-mulch",
+	"name": "@davehardy20/pi-mulch",
 	"version": "0.1.0",
-	"private": true,
 	"description": "Pi package that integrates Mulch priming, search, draft review, and session-aware learning workflows.",
 	"type": "module",
 	"keywords": [
@@ -9,13 +8,23 @@
 		"pi-extension",
 		"mulch"
 	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/davehardy20/pi-mulch.git"
+	},
+	"bugs": {
+		"url": "https://github.com/davehardy20/pi-mulch/issues"
+	},
+	"homepage": "https://github.com/davehardy20/pi-mulch#readme",
+	"publishConfig": {
+		"access": "public"
+	},
 	"files": [
 		"src",
 		"README.md",
-		"package.json",
-		"tsconfig.json",
-		"tsconfig.build.json",
-		"vitest.config.ts"
+		"LICENSE",
+		"package.json"
 	],
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
