@@ -26,9 +26,6 @@ export const DEFAULT_MULCH_CONFIG: MulchConfig = {
 
 interface SettingsRecord {
 	mulch?: Record<string, unknown>;
-	extensions?: {
-		mulch?: Record<string, unknown>;
-	};
 }
 
 export interface LoadConfigDeps {
@@ -37,41 +34,20 @@ export interface LoadConfigDeps {
 	homedir?: typeof os.homedir;
 }
 
-export function getSettingsPaths(
-	cwd: string,
-	homedir = os.homedir(),
-): {
-	globalPath: string;
-	projectPath: string;
-} {
-	return {
-		globalPath: path.join(homedir, ".pi", "agent", "settings.json"),
-		projectPath: path.join(cwd, ".pi", "settings.json"),
-	};
+export function getGlobalSettingsPath(homedir = os.homedir()): string {
+	return path.join(homedir, ".pi", "agent", "settings.json");
 }
 
 export function loadMulchConfig(
-	cwd: string,
+	_cwd: string,
 	deps: LoadConfigDeps = {},
 ): MulchConfig {
 	const readFileSync = deps.readFileSync ?? fs.readFileSync;
 	const existsSync = deps.existsSync ?? fs.existsSync;
-	const { globalPath, projectPath } = getSettingsPaths(
-		cwd,
-		(deps.homedir ?? os.homedir)(),
-	);
-
+	const globalPath = getGlobalSettingsPath((deps.homedir ?? os.homedir)());
 	const globalSettings = readSettingsFile(globalPath, readFileSync, existsSync);
-	const projectSettings = readSettingsFile(
-		projectPath,
-		readFileSync,
-		existsSync,
-	);
 
-	return normalizeMulchConfig({
-		...extractMulchSettings(globalSettings),
-		...stripProjectOnlyUnsafeOverrides(extractMulchSettings(projectSettings)),
-	});
+	return normalizeMulchConfig(extractMulchSettings(globalSettings));
 }
 
 export function normalizeMulchConfig(
@@ -166,24 +142,7 @@ function extractMulchSettings(
 	if (settings.mulch && typeof settings.mulch === "object") {
 		return settings.mulch;
 	}
-	if (
-		settings.extensions?.mulch &&
-		typeof settings.extensions.mulch === "object"
-	) {
-		return settings.extensions.mulch;
-	}
 	return {};
-}
-
-function stripProjectOnlyUnsafeOverrides(
-	settings: Record<string, unknown>,
-): Record<string, unknown> {
-	const {
-		command: _command,
-		cliCandidates: _cliCandidates,
-		...safeSettings
-	} = settings;
-	return safeSettings;
 }
 
 function normalizeStringArray(value: unknown): string[] {

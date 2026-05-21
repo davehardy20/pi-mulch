@@ -47,7 +47,7 @@ pi install /absolute/path/to/pi-mulch
 
 ## Settings
 
-Configure in `~/.pi/agent/settings.json` or `.pi/settings.json`:
+Configure in `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -78,10 +78,13 @@ Use top-level `mulch` settings. Do **not** put this config under Pi's top-level
 `extensions` key, because Pi reserves `extensions` for extension file paths and
 package sources, not per-extension config.
 
+If `~/.pi/agent/settings.json` is missing, invalid, or does not contain Mulch
+settings, pi-mulch uses its built-in defaults. Repo-local `.pi/settings.json`
+files are ignored for Mulch configuration.
+
 For safety:
 
-- `command` and `cliCandidates` are only honored from global Pi settings, not
-  repo-local `.pi/settings.json`
+- `command` and `cliCandidates` are only honored from global Pi settings
 - `draftDir` and `initStateFile` are always confined to the current repo root,
   even if configured otherwise
 

@@ -50,11 +50,10 @@ describe("normalizeMulchConfig", () => {
 });
 
 describe("loadMulchConfig", () => {
-	it("merges global and project mulch settings", () => {
+	it("loads mulch settings from the global Pi agent settings file", () => {
 		const home = makeTempDir();
 		const cwd = makeTempDir();
 		fs.mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
-		fs.mkdirSync(path.join(cwd, ".pi"), { recursive: true });
 
 		fs.writeFileSync(
 			path.join(home, ".pi", "agent", "settings.json"),
@@ -64,6 +63,32 @@ describe("loadMulchConfig", () => {
 					command: "mulch",
 					cliCandidates: ["mulch", "ml"],
 					primeBudget: 1234,
+					draftMode: "off",
+				},
+			}),
+		);
+
+		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual({
+			...DEFAULT_MULCH_CONFIG,
+			enabled: false,
+			command: "mulch",
+			cliCandidates: ["mulch", "ml"],
+			primeBudget: 1234,
+			draftMode: "off",
+		});
+	});
+
+	it("ignores repo-local settings and only uses the global Pi agent settings file", () => {
+		const home = makeTempDir();
+		const cwd = makeTempDir();
+		fs.mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+		fs.mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+
+		fs.writeFileSync(
+			path.join(home, ".pi", "agent", "settings.json"),
+			JSON.stringify({
+				mulch: {
+					primeBudget: 1234,
 				},
 			}),
 		);
@@ -71,7 +96,7 @@ describe("loadMulchConfig", () => {
 			path.join(cwd, ".pi", "settings.json"),
 			JSON.stringify({
 				mulch: {
-					enabled: true,
+					enabled: false,
 					command: "repo-local-cli",
 					cliCandidates: ["repo-local-cli"],
 					draftMode: "off",
@@ -81,26 +106,17 @@ describe("loadMulchConfig", () => {
 
 		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual({
 			...DEFAULT_MULCH_CONFIG,
-			enabled: true,
-			command: "mulch",
-			cliCandidates: ["mulch", "ml"],
 			primeBudget: 1234,
-			draftMode: "off",
 		});
 	});
 
-	it("supports extensions.mulch and tolerates invalid JSON", () => {
+	it("ignores extensions.mulch and tolerates invalid JSON", () => {
 		const home = makeTempDir();
 		const cwd = makeTempDir();
 		fs.mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
-		fs.mkdirSync(path.join(cwd, ".pi"), { recursive: true });
 
 		fs.writeFileSync(
 			path.join(home, ".pi", "agent", "settings.json"),
-			"{not-json",
-		);
-		fs.writeFileSync(
-			path.join(cwd, ".pi", "settings.json"),
 			JSON.stringify({
 				extensions: {
 					mulch: {
@@ -110,9 +126,36 @@ describe("loadMulchConfig", () => {
 			}),
 		);
 
-		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual({
-			...DEFAULT_MULCH_CONFIG,
-			maxTrackedFiles: 99,
-		});
+		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual(
+			DEFAULT_MULCH_CONFIG,
+		);
+
+		fs.writeFileSync(
+			path.join(home, ".pi", "agent", "settings.json"),
+			"{not-json",
+		);
+
+		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual(
+			DEFAULT_MULCH_CONFIG,
+		);
+	});
+
+	it("falls back to defaults when the global file is missing or has no mulch settings", () => {
+		const home = makeTempDir();
+		const cwd = makeTempDir();
+
+		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual(
+			DEFAULT_MULCH_CONFIG,
+		);
+
+		fs.mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+		fs.writeFileSync(
+			path.join(home, ".pi", "agent", "settings.json"),
+			JSON.stringify({ theme: "dark" }),
+		);
+
+		expect(loadMulchConfig(cwd, { homedir: () => home })).toEqual(
+			DEFAULT_MULCH_CONFIG,
+		);
 	});
 });
