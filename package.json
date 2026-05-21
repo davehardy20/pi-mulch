@@ -1,6 +1,6 @@
 {
 	"name": "@davehardy20/pi-mulch",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Pi package that integrates Mulch priming, search, draft review, and session-aware learning workflows.",
 	"type": "module",
 	"keywords": [
