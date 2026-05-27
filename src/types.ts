@@ -22,6 +22,7 @@ export interface MulchConfig {
 	cliCandidates: string[];
 	injectionMode: MulchInjectionMode;
 	primeBudget: number;
+	outputMaxChars: number;
 	promptOnMissingInit: boolean;
 	persistInitDecline: boolean;
 	draftMode: MulchDraftMode;

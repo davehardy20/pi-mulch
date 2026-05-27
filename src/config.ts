@@ -9,6 +9,7 @@ export const DEFAULT_MULCH_CONFIG: MulchConfig = {
 	cliCandidates: ["mulch", "ml"],
 	injectionMode: "manifest",
 	primeBudget: 4_000,
+	outputMaxChars: 6_000,
 	promptOnMissingInit: true,
 	persistInitDecline: true,
 	draftMode: "session-end",
@@ -86,6 +87,10 @@ export function normalizeMulchConfig(
 			typeof input.primeBudget === "number" && input.primeBudget > 0
 				? Math.floor(input.primeBudget)
 				: DEFAULT_MULCH_CONFIG.primeBudget,
+		outputMaxChars:
+			typeof input.outputMaxChars === "number" && input.outputMaxChars > 0
+				? Math.floor(input.outputMaxChars)
+				: DEFAULT_MULCH_CONFIG.outputMaxChars,
 		promptOnMissingInit:
 			typeof input.promptOnMissingInit === "boolean"
 				? input.promptOnMissingInit

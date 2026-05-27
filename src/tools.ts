@@ -9,6 +9,9 @@ import {
 import { buildPrimeRequest } from "./prime.js";
 import type { MulchConfig } from "./types.js";
 
+const FULL_OUTPUT_DESCRIPTION =
+	"Return the full raw Mulch output instead of the default bounded summary.";
+
 export interface ToolRuntime {
 	getConfig(): MulchConfig;
 	getDetection(cwd: string): MulchDetectionResult | null;
@@ -37,6 +40,9 @@ export function registerMulchTools(
 			parameters: Type.Object({
 				files: Type.Optional(Type.Array(Type.String())),
 				budget: Type.Optional(Type.Number({ minimum: 1 })),
+				fullOutput: Type.Optional(
+					Type.Boolean({ description: FULL_OUTPUT_DESCRIPTION }),
+				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 				const detection = runtime.getDetection(ctx.cwd);
@@ -64,7 +70,7 @@ export function registerMulchTools(
 					},
 					deps,
 				);
-				return toolResult(result);
+				return toolResult(result, config, params.fullOutput === true);
 			},
 		});
 	}
@@ -81,6 +87,9 @@ export function registerMulchTools(
 				domain: Type.Optional(Type.String()),
 				file: Type.Optional(Type.String()),
 				type: Type.Optional(Type.String()),
+				fullOutput: Type.Optional(
+					Type.Boolean({ description: FULL_OUTPUT_DESCRIPTION }),
+				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 				const detection = runtime.getDetection(ctx.cwd);
@@ -102,7 +111,7 @@ export function registerMulchTools(
 					},
 					deps,
 				);
-				return toolResult(result);
+				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -119,6 +128,9 @@ export function registerMulchTools(
 				file: Type.Optional(Type.String()),
 				type: Type.Optional(Type.String()),
 				all: Type.Optional(Type.Boolean()),
+				fullOutput: Type.Optional(
+					Type.Boolean({ description: FULL_OUTPUT_DESCRIPTION }),
+				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 				const detection = runtime.getDetection(ctx.cwd);
@@ -141,7 +153,7 @@ export function registerMulchTools(
 					},
 					deps,
 				);
-				return toolResult(result);
+				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -154,8 +166,12 @@ export function registerMulchTools(
 				"Show changed files and Mulch domain suggestions for learnings.",
 			promptSnippet:
 				"Use mulch_learn to inspect what Mulch thinks is worth recording from current changes.",
-			parameters: Type.Object({}),
-			async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
+			parameters: Type.Object({
+				fullOutput: Type.Optional(
+					Type.Boolean({ description: FULL_OUTPUT_DESCRIPTION }),
+				),
+			}),
+			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.ready || !detection.cliCommand) {
 					return errorToolResult("Mulch is not ready in this repository.");
@@ -171,7 +187,7 @@ export function registerMulchTools(
 					},
 					deps,
 				);
-				return toolResult(result);
+				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -183,8 +199,12 @@ export function registerMulchTools(
 			description: "Show current Mulch domain and governance status.",
 			promptSnippet:
 				"Use mulch_status to inspect Mulch repository readiness and domain counts.",
-			parameters: Type.Object({}),
-			async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
+			parameters: Type.Object({
+				fullOutput: Type.Optional(
+					Type.Boolean({ description: FULL_OUTPUT_DESCRIPTION }),
+				),
+			}),
+			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.cliAvailable || !detection.cliCommand) {
 					return errorToolResult("Mulch CLI is not available.");
@@ -200,7 +220,7 @@ export function registerMulchTools(
 					},
 					deps,
 				);
-				return toolResult(result);
+				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -214,19 +234,56 @@ function errorToolResult(message: string) {
 	};
 }
 
-function toolResult(result: Awaited<ReturnType<typeof runMulchCommand>>) {
-	const text = result.json
+function toolResult(
+	result: Awaited<ReturnType<typeof runMulchCommand>>,
+	config: MulchConfig,
+	fullOutput = false,
+) {
+	const rawText = result.json
 		? JSON.stringify(result.json, null, 2)
 		: formatMulchResult(result);
+	const output = fullOutput
+		? { text: rawText, truncated: false }
+		: boundMulchOutput(rawText, config.outputMaxChars);
+	const command = `${result.command} ${result.args.join(" ")}`.trim();
 
 	return {
-		content: [{ type: "text" as const, text }],
+		content: [{ type: "text" as const, text: output.text }],
 		details: {
-			command: `${result.command} ${result.args.join(" ")}`.trim(),
+			command,
 			exitCode: result.exitCode,
 			success: result.ok,
-			json: result.json,
+			outputTruncated: output.truncated,
+			outputChars: rawText.length,
+			outputMaxChars: fullOutput ? null : config.outputMaxChars,
+			recovery: output.truncated
+				? `Re-run the same Mulch tool with fullOutput=true, or run: ${command}`
+				: undefined,
+			json: output.truncated ? undefined : result.json,
 		},
 		isError: !result.ok,
+	};
+}
+
+function boundMulchOutput(text: string, maxChars: number) {
+	if (text.length <= maxChars) {
+		return { text, truncated: false };
+	}
+
+	const marker = `\n\n… Mulch output truncated from ${text.length} to ${maxChars} chars. Re-run with fullOutput=true for the complete output. …\n\n`;
+	if (marker.length >= maxChars) {
+		return {
+			text: marker.slice(0, maxChars),
+			truncated: true,
+		};
+	}
+
+	const available = maxChars - marker.length;
+	const headChars = Math.ceil(available * 0.65);
+	const tailChars = Math.floor(available * 0.35);
+
+	return {
+		text: `${text.slice(0, headChars)}${marker}${text.slice(text.length - tailChars)}`,
+		truncated: true,
 	};
 }

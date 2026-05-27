@@ -30,6 +30,10 @@ describe("DEFAULT_MULCH_CONFIG", () => {
 	it("defaults command to null for auto-detection", () => {
 		expect(DEFAULT_MULCH_CONFIG.command).toBeNull();
 	});
+
+	it("defaults parent-context Mulch tool output to a bounded size", () => {
+		expect(DEFAULT_MULCH_CONFIG.outputMaxChars).toBe(6_000);
+	});
 });
 
 describe("normalizeMulchConfig", () => {
@@ -63,6 +67,7 @@ describe("loadMulchConfig", () => {
 					command: "mulch",
 					cliCandidates: ["mulch", "ml"],
 					primeBudget: 1234,
+					outputMaxChars: 4321,
 					draftMode: "off",
 				},
 			}),
@@ -74,6 +79,7 @@ describe("loadMulchConfig", () => {
 			command: "mulch",
 			cliCandidates: ["mulch", "ml"],
 			primeBudget: 1234,
+			outputMaxChars: 4321,
 			draftMode: "off",
 		});
 	});

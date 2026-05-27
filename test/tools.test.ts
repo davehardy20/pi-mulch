@@ -129,6 +129,59 @@ describe("registerMulchTools", () => {
 		]);
 	});
 
+	it("caps oversized default Mulch tool output and keeps full output recoverable", async () => {
+		const { pi, tools } = createMockPi();
+		const largeValue = "x".repeat(2_000);
+
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => ({ ...DEFAULT_MULCH_CONFIG, outputMaxChars: 400 }),
+				getDetection: () => ({ ...READY_DETECTION }),
+				getTouchedFiles: () => [],
+			},
+			async (options) => ({
+				command: options.command as string,
+				args: options.args,
+				cwd: options.cwd,
+				exitCode: 0,
+				stdout: JSON.stringify({ records: [{ content: largeValue }] }),
+				stderr: "",
+				ok: true,
+				json: { records: [{ content: largeValue }] },
+			}),
+		);
+
+		const capped = (await tools
+			.get("mulch_query")
+			?.execute("tool-capped", {}, undefined, undefined, {
+				cwd: "/repo",
+			})) as {
+				content: Array<{ text: string }>;
+				details: Record<string, unknown>;
+			};
+
+		expect(capped.content[0]?.text.length).toBeLessThanOrEqual(400);
+		expect(capped.content[0]?.text).toContain("Mulch output truncated");
+		expect(capped.details.outputTruncated).toBe(true);
+		expect(capped.details.json).toBeUndefined();
+		expect(capped.details.recovery).toContain("fullOutput=true");
+
+		const full = (await tools
+			.get("mulch_query")
+			?.execute("tool-full", { fullOutput: true }, undefined, undefined, {
+				cwd: "/repo",
+			})) as {
+				content: Array<{ text: string }>;
+				details: Record<string, unknown>;
+			};
+
+		expect(full.content[0]?.text.length).toBeGreaterThan(1_000);
+		expect(full.content[0]?.text).toContain(largeValue);
+		expect(full.details.outputTruncated).toBe(false);
+		expect(full.details.json).toEqual({ records: [{ content: largeValue }] });
+	});
+
 	it("mulch_search returns error result when Mulch is not ready", async () => {
 		const { pi, tools } = createMockPi();
 

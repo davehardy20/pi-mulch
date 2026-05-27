@@ -57,6 +57,7 @@ Configure in `~/.pi/agent/settings.json`:
     "cliCandidates": ["mulch", "ml"],
     "injectionMode": "manifest",
     "primeBudget": 4000,
+    "outputMaxChars": 6000,
     "promptOnMissingInit": true,
     "persistInitDecline": true,
     "draftMode": "session-end",
@@ -81,6 +82,10 @@ package sources, not per-extension config.
 If `~/.pi/agent/settings.json` is missing, invalid, or does not contain Mulch
 settings, pi-mulch uses its built-in defaults. Repo-local `.pi/settings.json`
 files are ignored for Mulch configuration.
+
+Mulch read tools return bounded summaries by default (`outputMaxChars`, 6000
+chars unless overridden). Re-run the same tool with `fullOutput: true` when a
+complete raw result is needed.
 
 For safety:
 
