@@ -5,7 +5,7 @@ import {
 	type MulchStoreScope,
 } from "./detect.js";
 import { type RunMulchCommandDeps, runMulchCommand } from "./exec.js";
-import { toRepoRelativePath } from "./path-utils.js";
+import { isPathInsideRoot, toRepoRelativePath } from "./path-utils.js";
 import type {
 	MulchConfig,
 	MulchPrimeInjection,
@@ -18,15 +18,15 @@ export function buildPrimeRequest(
 	config: MulchConfig,
 	scope?: MulchStoreScope,
 ): MulchPrimeRequest {
-	const repoRoot =
+	const repoRoot = path.resolve(
 		detection.gitRepoRoot ??
-		path.dirname(scope?.directoryPath ?? detection.directoryPath);
+			detection.workingDirectory ??
+			path.dirname(scope?.directoryPath ?? detection.directoryPath),
+	);
 	const scopedFiles = touchedFiles
 		.filter((filePath) => path.isAbsolute(filePath))
-		.filter(
-			(filePath) =>
-				filePath === repoRoot || filePath.startsWith(`${repoRoot}${path.sep}`),
-		)
+		.map((filePath) => path.resolve(filePath))
+		.filter((filePath) => isPathInsideRoot(repoRoot, filePath))
 		.map((filePath) =>
 			scope?.kind === "global"
 				? filePath

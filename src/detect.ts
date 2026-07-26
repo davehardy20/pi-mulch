@@ -34,6 +34,8 @@ export interface MulchDetectionResult {
 	mainWorktreeRoot: string | null;
 	isGitRepo: boolean;
 	gitRepoRoot: string | null;
+	/** Pi's original working directory, retained when the global store changes commandCwd. */
+	workingDirectory?: string;
 	/**
 	 * The working directory to use when invoking mulch CLI commands.
 	 * Normally equals `gitRepoRoot`, but when `.mulch/` was found in the
@@ -127,6 +129,7 @@ export function detectMulch(
 		mainWorktreeRoot,
 		isGitRepo,
 		gitRepoRoot,
+		workingDirectory: cwd,
 		commandCwd,
 		ready: cliAvailable && directoryExists,
 	};

@@ -92,6 +92,63 @@ describe("buildPrimeRequest", () => {
 			signature: "global:files:/repo/src/index.ts:4000",
 		});
 	});
+
+	it("uses the detected working directory for non-Git global priming", () => {
+		const nonGitDetection = detectionWith({
+			isGitRepo: false,
+			gitRepoRoot: null,
+			workingDirectory: "/workspace/project",
+			projectDirectoryExists: false,
+			projectDirectoryPath: "/workspace/project/.mulch",
+			projectCommandCwd: "/workspace/project",
+		});
+
+		expect(
+			buildPrimeRequest(
+				nonGitDetection,
+				["/workspace/project/src/index.ts"],
+				DEFAULT_MULCH_CONFIG,
+				{
+					kind: "global",
+					label: "Global Mulch memories (~/.mulch)",
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+				},
+			),
+		).toMatchObject({
+			mode: "files",
+			scopedFiles: ["/workspace/project/src/index.ts"],
+		});
+	});
+
+	it("rejects traversal paths outside the repository for every scope", () => {
+		const traversalPath = "/repo/../outside.ts";
+		const projectRequest = buildPrimeRequest(
+			detection,
+			[traversalPath],
+			DEFAULT_MULCH_CONFIG,
+			{
+				kind: "project",
+				label: "Repository-specific Mulch memories (.mulch)",
+				directoryPath: "/repo/.mulch",
+				commandCwd: "/repo",
+			},
+		);
+		const globalRequest = buildPrimeRequest(
+			detection,
+			[traversalPath],
+			DEFAULT_MULCH_CONFIG,
+			{
+				kind: "global",
+				label: "Global Mulch memories (~/.mulch)",
+				directoryPath: "/home/user/.mulch",
+				commandCwd: "/home/user",
+			},
+		);
+
+		expect(projectRequest).toMatchObject({ mode: "manifest", scopedFiles: [] });
+		expect(globalRequest).toMatchObject({ mode: "manifest", scopedFiles: [] });
+	});
 });
 
 describe("createPrimeInjection", () => {
