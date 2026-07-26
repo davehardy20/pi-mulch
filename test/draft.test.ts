@@ -126,6 +126,56 @@ describe("maybeWriteSessionDraft", () => {
 
 		expect(skipped).toBeNull();
 	});
+
+	it("writes session drafts under the global Mulch store when available", async () => {
+		const repoRoot = makeTempDir();
+		const globalRoot = makeTempDir();
+		let learnCwd: string | undefined;
+
+		const draftPath = await maybeWriteSessionDraft(
+			{
+				detection: {
+					...readyDetection(repoRoot),
+					directoryPath: path.join(globalRoot, ".mulch"),
+					globalDirectoryExists: true,
+					globalDirectoryPath: path.join(globalRoot, ".mulch"),
+					globalCommandCwd: globalRoot,
+					commandCwd: globalRoot,
+				},
+				config: DEFAULT_MULCH_CONFIG,
+				sessionManager: {
+					getEntries: () => [
+						{
+							type: "custom_message",
+							customType: "post-turn-linter-status",
+							details: { status: "clean" },
+						},
+					],
+				} as never,
+				touchedFiles: [path.join(repoRoot, "src/index.ts")],
+				lastUserPrompt: "implement feature",
+			},
+			async (options) => {
+				learnCwd = options.cwd;
+				return {
+					command: "mulch",
+					args: ["learn"],
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: '{"suggestedDomains":["extensions"]}',
+					stderr: "",
+					ok: true,
+					json: { suggestedDomains: ["extensions"] },
+				};
+			},
+		);
+
+		expect(learnCwd).toBe(globalRoot);
+		expect(
+			draftPath?.startsWith(path.join(globalRoot, ".mulch", "drafts")),
+		).toBe(true);
+		expect(loadDraftFile(draftPath as string).repoRoot).toBe(repoRoot);
+	});
 });
 
 describe("applyDraftFile", () => {

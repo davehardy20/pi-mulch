@@ -1005,7 +1005,7 @@ describe("session lifecycle", () => {
 			await eventHandlers.get("session_start")?.({}, ctx2);
 			expect(ctx2.ui.setStatus).toHaveBeenCalledWith(
 				"mulch",
-				"mulch: init available",
+				"mulch: global init available",
 			);
 			expect(ctx2.ui.confirm).toHaveBeenCalled();
 		});

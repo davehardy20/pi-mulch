@@ -384,11 +384,12 @@ describe("detectMulch", () => {
 
 		expect(result.isWorktree).toBe(true);
 		expect(result.mainWorktreeRoot).toBe("/main-repo");
-		// Should use the worktree-local .mulch
-		expect(result.directoryPath).toBe("/worktree/.mulch");
+		// Global ~/.mulch is now primary; project .mulch remains a secondary scope.
+		expect(result.directoryPath).toBe(result.globalDirectoryPath);
+		expect(result.projectDirectoryPath).toBe("/worktree/.mulch");
 		expect(result.directoryExists).toBe(true);
-		// commandCwd stays at worktree root since .mulch found locally
-		expect(result.commandCwd).toBe("/worktree");
+		expect(result.commandCwd).toBe(result.globalCommandCwd);
+		expect(result.projectCommandCwd).toBe("/worktree");
 	});
 
 	it("reports not a worktree when --git-common-dir is relative", () => {

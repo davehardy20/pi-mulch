@@ -5,7 +5,8 @@ Pi package for Mulch-aware priming, search, status, and draft review workflows.
 ## What it adds
 
 - session-start Mulch detection (`mulch` or `ml`)
-- one-time repo-local prompt to run `mulch init` when `.mulch/` is missing
+- global Mulch store detection under `~/.mulch`, plus existing repo `.mulch/` as a secondary read scope
+- one-time prompt to run `mulch init` for the global store when `~/.mulch/` is missing
 - hidden `before_agent_start` priming via `mulch prime`
 - touched-file tracking from common Pi tool activity
 - LLM-callable tools:
@@ -90,8 +91,8 @@ complete raw result is needed.
 For safety:
 
 - `command` and `cliCandidates` are only honored from global Pi settings
-- `draftDir` and `initStateFile` are always confined to the current repo root,
-  even if configured otherwise
+- `draftDir` is confined to the active Mulch store root, which is normally `~/.mulch`
+- `initStateFile` is confined to the current repo root for per-repo prompt suppression
 
 ## Draft workflow
 
@@ -107,16 +108,16 @@ session end**. You should not need to run `ml learn` and `ml record
 3. When `draftMode` is `"session-end"`, relevant files were touched,
    and the post-turn-linter finished **cleanly**, the extension can
    generate draft records at session end.
-4. Drafts are written to `.mulch/drafts/`.
+4. Drafts are written to the active Mulch store, normally `~/.mulch/drafts/`.
 5. You review drafts with `/mulch-review`.
 6. You apply drafts with `/mulch-apply`.
-7. After applying drafts to real Mulch records, run `ml sync` to
-   validate and commit `.mulch/` changes.
+7. After applying drafts to real Mulch records, run `ml sync` from your home directory to
+   validate and commit `~/.mulch/` changes.
 
 ### Important distinction
 
 - **Automatic when enabled:** session-end draft generation into
-  `.mulch/drafts/`
+  `~/.mulch/drafts/` by default
 - **Manual review step:** `/mulch-review` and `/mulch-apply`
 - **Manual persistence/sync step:** `ml sync`
 

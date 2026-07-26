@@ -8,6 +8,7 @@ import { DEFAULT_MULCH_CONFIG, loadMulchConfig } from "./config.js";
 import {
 	type DetectOptions,
 	detectMulch,
+	getMulchStoreScopes,
 	type MulchDetectionResult,
 } from "./detect.js";
 import {
@@ -23,11 +24,7 @@ import {
 	extractPathsFromToolResult,
 	extractPathsFromToolResultDetails,
 } from "./paths.js";
-import {
-	buildPrimeRequest,
-	createPrimeInjection,
-	shouldInjectPrime,
-} from "./prime.js";
+import { createPrimeInjection, shouldInjectPrime } from "./prime.js";
 import {
 	createMulchSessionState,
 	loadRepoInitState,
@@ -76,6 +73,23 @@ export default function mulchIntegrationExtension(
 		return state.detection ?? refreshDetection(cwd);
 	}
 
+	function getGlobalMulchDirectoryPath(
+		detection: MulchDetectionResult,
+	): string {
+		return detection.globalDirectoryPath ?? detection.directoryPath;
+	}
+
+	function getGlobalMulchCommandCwd(detection: MulchDetectionResult): string {
+		return (
+			detection.globalCommandCwd ??
+			path.dirname(getGlobalMulchDirectoryPath(detection))
+		);
+	}
+
+	function isGlobalMulchInitialized(detection: MulchDetectionResult): boolean {
+		return detection.globalDirectoryExists ?? detection.directoryExists;
+	}
+
 	function setStatus(ctx: ExtensionContext): void {
 		const detection = state.detection;
 		if (!config.enabled) {
@@ -86,8 +100,8 @@ export default function mulchIntegrationExtension(
 			ctx.ui.setStatus("mulch", "mulch: cli missing");
 			return;
 		}
-		if (!detection.directoryExists) {
-			ctx.ui.setStatus("mulch", "mulch: init available");
+		if (!isGlobalMulchInitialized(detection)) {
+			ctx.ui.setStatus("mulch", "mulch: global init available");
 			return;
 		}
 		ctx.ui.setStatus(
@@ -121,9 +135,10 @@ export default function mulchIntegrationExtension(
 		if (!ctx.hasUI) return;
 
 		const cli = detection.cliCommand ?? "mulch";
+		const globalPath = getGlobalMulchDirectoryPath(detection);
 		const confirmed = await ctx.ui.confirm(
-			"Initialize Mulch?",
-			`No .mulch/ directory was found for this repo. Run \`${cli} init\` now?`,
+			"Initialize global Mulch?",
+			`No global Mulch store was found at ${globalPath}. Run \`${cli} init\` from your home directory now?`,
 		);
 
 		if (!confirmed) {
@@ -140,7 +155,7 @@ export default function mulchIntegrationExtension(
 		const result = await runMulch({
 			command: detection.cliCommand,
 			args: ["init"],
-			cwd: detection.commandCwd,
+			cwd: getGlobalMulchCommandCwd(detection),
 		});
 
 		if (result.ok) {
@@ -150,7 +165,7 @@ export default function mulchIntegrationExtension(
 			});
 			refreshDetection(ctx.cwd);
 			setStatus(ctx);
-			ctx.ui.notify("Mulch initialized for this repository.", "info");
+			ctx.ui.notify("Global Mulch store initialized.", "info");
 			return;
 		}
 
@@ -186,27 +201,69 @@ export default function mulchIntegrationExtension(
 		});
 	}
 
+	async function runScopedCommandAndRender(
+		ctx: ExtensionCommandContext,
+		args: string[],
+		json = false,
+	): Promise<void> {
+		const detection = getDetection(ctx.cwd);
+		if (!detection?.ready || !detection.cliCommand) {
+			sendVisibleMessage("Mulch is not ready in this repository.");
+			return;
+		}
+
+		const rendered: string[] = [];
+		const results: Array<Record<string, unknown>> = [];
+		let success = false;
+
+		for (const scope of getMulchStoreScopes(detection)) {
+			const result = await runMulch({
+				command: detection.cliCommand,
+				args,
+				cwd: scope.commandCwd,
+				json,
+			});
+			if (result.ok) success = true;
+			results.push({
+				scope: scope.kind,
+				label: scope.label,
+				command: `${result.command} ${result.args.join(" ")}`.trim(),
+				exitCode: result.exitCode,
+				success: result.ok,
+			});
+			const content =
+				result.json !== undefined
+					? JSON.stringify(result.json, null, 2)
+					: formatMulchResult(result);
+			rendered.push(
+				scope.kind === "primary" ? content : `## ${scope.label}\n\n${content}`,
+			);
+		}
+
+		sendVisibleMessage(rendered.join("\n\n---\n\n"), {
+			command: `${detection.cliCommand} ${args.join(" ")}`.trim(),
+			success,
+			scopes: results,
+		});
+	}
+
 	async function commandInit(ctx: ExtensionCommandContext): Promise<void> {
 		const detection = getDetection(ctx.cwd);
 		if (!detection?.cliAvailable || !detection.cliCommand) {
 			sendVisibleMessage("Mulch CLI is not available.");
 			return;
 		}
-		if (detection.directoryExists) {
+		if (isGlobalMulchInitialized(detection)) {
 			sendVisibleMessage(
-				`Mulch is already initialized at ${detection.directoryPath}.`,
+				`Global Mulch is already initialized at ${getGlobalMulchDirectoryPath(detection)}.`,
 			);
-			return;
-		}
-		if (!detection.gitRepoRoot) {
-			sendVisibleMessage("Mulch init requires a Git repository.");
 			return;
 		}
 
 		if (ctx.hasUI) {
 			const confirmed = await ctx.ui.confirm(
 				"Run mulch init?",
-				`Initialize Mulch in ${detection.gitRepoRoot}?`,
+				`Initialize global Mulch at ${getGlobalMulchDirectoryPath(detection)}?`,
 			);
 			if (!confirmed) return;
 		}
@@ -214,7 +271,7 @@ export default function mulchIntegrationExtension(
 		const result = await runMulch({
 			command: detection.cliCommand,
 			args: ["init"],
-			cwd: detection.commandCwd,
+			cwd: getGlobalMulchCommandCwd(detection),
 		});
 		sendVisibleMessage(formatMulchResult(result));
 		if (result.ok) {
@@ -469,12 +526,24 @@ export default function mulchIntegrationExtension(
 				sendVisibleMessage("Mulch is not ready in this repository.");
 				return;
 			}
-			const request = buildPrimeRequest(
-				detection,
-				state.touchedFiles.getAll(),
-				config,
+			const injection = await createPrimeInjection(
+				{
+					detection,
+					touchedFiles: state.touchedFiles.getAll(),
+					config,
+					signal: ctx.signal,
+				},
+				runMulch,
 			);
-			await runCommandAndRender(ctx, request.args, false);
+			if (!injection) {
+				sendVisibleMessage("Mulch prime returned no usable context.");
+				return;
+			}
+			sendVisibleMessage(injection.content, {
+				command: "mulch prime",
+				success: true,
+				signature: injection.signature,
+			});
 		},
 	});
 
@@ -486,7 +555,7 @@ export default function mulchIntegrationExtension(
 				sendVisibleMessage("Usage: /mulch-search <query>");
 				return;
 			}
-			await runCommandAndRender(ctx, ["search", query], true);
+			await runScopedCommandAndRender(ctx, ["search", query], true);
 		},
 	});
 
@@ -494,7 +563,7 @@ export default function mulchIntegrationExtension(
 		description: "Query Mulch records for one domain or all domains.",
 		handler: async (args, ctx) => {
 			const trimmed = args.trim();
-			await runCommandAndRender(
+			await runScopedCommandAndRender(
 				ctx,
 				trimmed ? ["query", trimmed] : ["query", "--all"],
 				true,
@@ -505,7 +574,7 @@ export default function mulchIntegrationExtension(
 	pi.registerCommand("mulch-learn", {
 		description: "Show Mulch learn suggestions for current changes.",
 		handler: async (_args, ctx) => {
-			await runCommandAndRender(ctx, ["learn"], true);
+			await runScopedCommandAndRender(ctx, ["learn"], true);
 		},
 	});
 
@@ -521,7 +590,7 @@ export default function mulchIntegrationExtension(
 				sendVisibleMessage(JSON.stringify(detection, null, 2));
 				return;
 			}
-			await runCommandAndRender(ctx, ["status"], true);
+			await runScopedCommandAndRender(ctx, ["status"], true);
 		},
 	});
 

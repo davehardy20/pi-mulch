@@ -159,6 +159,10 @@ export function getActionableDraftRecords(
 	return draft.records.filter((record) => toBatchRecord(record) !== null);
 }
 
+function getPrimaryMulchCommandCwd(detection: MulchDetectionResult): string {
+	return detection.globalCommandCwd ?? detection.commandCwd;
+}
+
 export async function maybeWriteSessionDraft(
 	params: {
 		detection: MulchDetectionResult | null;
@@ -184,7 +188,7 @@ export async function maybeWriteSessionDraft(
 	}
 
 	const repoRoot = params.detection.gitRepoRoot;
-	const mulchRoot = params.detection.commandCwd;
+	const mulchRoot = getPrimaryMulchCommandCwd(params.detection);
 	const repoFiles = params.touchedFiles.filter(
 		(filePath) =>
 			filePath === repoRoot || filePath.startsWith(`${repoRoot}${path.sep}`),

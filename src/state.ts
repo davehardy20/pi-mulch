@@ -109,7 +109,9 @@ export function shouldOfferInitPrompt(
 	if (!config.enabled) return false;
 	if (!config.promptOnMissingInit) return false;
 	if (!detection?.cliAvailable) return false;
-	if (detection.directoryExists) return false;
+	if (detection.globalDirectoryExists ?? detection.directoryExists) {
+		return false;
+	}
 	if (!detection.isGitRepo || !detection.gitRepoRoot) return false;
 	if (repoInitState.suppressInitPrompt) return false;
 	if (state.initPromptedRepos.has(detection.gitRepoRoot)) return false;

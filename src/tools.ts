@@ -1,12 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { MulchDetectionResult } from "./detect.js";
+import {
+	getMulchStoreScopes,
+	type MulchDetectionResult,
+	type MulchStoreScope,
+} from "./detect.js";
 import {
 	formatMulchResult,
 	type RunMulchCommandDeps,
 	runMulchCommand,
 } from "./exec.js";
-import { buildPrimeRequest } from "./prime.js";
+import { createPrimeInjection } from "./prime.js";
 import type { MulchConfig } from "./types.js";
 
 const FULL_OUTPUT_DESCRIPTION =
@@ -51,26 +55,36 @@ export function registerMulchTools(
 				}
 
 				const config = runtime.getConfig();
-				const request = buildPrimeRequest(
-					detection,
-					params.files && params.files.length > 0
-						? params.files.map((filePath) => filePath)
-						: runtime.getTouchedFiles(),
+				const injection = await createPrimeInjection(
 					{
-						...config,
-						primeBudget: params.budget ?? config.primeBudget,
-					},
-				);
-				const result = await runner(
-					{
-						command: detection.cliCommand,
-						args: request.args,
-						cwd: detection.commandCwd,
+						detection,
+						touchedFiles:
+							params.files && params.files.length > 0
+								? params.files.map((filePath) => filePath)
+								: runtime.getTouchedFiles(),
+						config: {
+							...config,
+							primeBudget: params.budget ?? config.primeBudget,
+						},
 						signal,
 					},
+					runner,
 					deps,
 				);
-				return toolResult(result, config, params.fullOutput === true);
+				if (!injection) {
+					return errorToolResult("Mulch prime returned no usable context.");
+				}
+				return textToolResult(
+					injection.content,
+					config,
+					params.fullOutput === true,
+					{
+						command: "mulch prime",
+						exitCode: 0,
+						success: true,
+						signature: injection.signature,
+					},
+				);
 			},
 		});
 	}
@@ -101,17 +115,18 @@ export function registerMulchTools(
 				if (params.domain) args.push("--domain", params.domain);
 				if (params.file) args.push("--file", params.file);
 				if (params.type) args.push("--type", params.type);
-				const result = await runner(
+				return scopedToolResult(
+					detection,
+					args,
+					runtime.getConfig(),
+					runner,
+					deps,
 					{
-						command: detection.cliCommand,
-						args,
-						cwd: detection.commandCwd,
 						json: true,
+						fullOutput: params.fullOutput === true,
 						signal,
 					},
-					deps,
 				);
-				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -143,17 +158,18 @@ export function registerMulchTools(
 				if (params.file) args.push("--file", params.file);
 				if (params.type) args.push("--type", params.type);
 				if (params.all) args.push("--all");
-				const result = await runner(
+				return scopedToolResult(
+					detection,
+					args,
+					runtime.getConfig(),
+					runner,
+					deps,
 					{
-						command: detection.cliCommand,
-						args,
-						cwd: detection.commandCwd,
 						json: true,
+						fullOutput: params.fullOutput === true,
 						signal,
 					},
-					deps,
 				);
-				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -177,17 +193,18 @@ export function registerMulchTools(
 					return errorToolResult("Mulch is not ready in this repository.");
 				}
 
-				const result = await runner(
+				return scopedToolResult(
+					detection,
+					["learn"],
+					runtime.getConfig(),
+					runner,
+					deps,
 					{
-						command: detection.cliCommand,
-						args: ["learn"],
-						cwd: detection.commandCwd,
 						json: true,
+						fullOutput: params.fullOutput === true,
 						signal,
 					},
-					deps,
 				);
-				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -210,17 +227,35 @@ export function registerMulchTools(
 					return errorToolResult("Mulch CLI is not available.");
 				}
 
-				const result = await runner(
+				if (!detection.directoryExists) {
+					const result = await runner(
+						{
+							command: detection.cliCommand,
+							args: ["--version"],
+							cwd: detection.commandCwd,
+							signal,
+						},
+						deps,
+					);
+					return toolResult(
+						result,
+						runtime.getConfig(),
+						params.fullOutput === true,
+					);
+				}
+
+				return scopedToolResult(
+					detection,
+					["status"],
+					runtime.getConfig(),
+					runner,
+					deps,
 					{
-						command: detection.cliCommand,
-						args: detection.directoryExists ? ["status"] : ["--version"],
-						cwd: detection.commandCwd,
-						json: detection.directoryExists,
+						json: true,
+						fullOutput: params.fullOutput === true,
 						signal,
 					},
-					deps,
 				);
-				return toolResult(result, runtime.getConfig(), params.fullOutput === true);
 			},
 		});
 	}
@@ -231,6 +266,115 @@ function errorToolResult(message: string) {
 		content: [{ type: "text" as const, text: message }],
 		details: { success: false },
 		isError: true,
+	};
+}
+
+interface ScopedToolOptions {
+	json?: boolean;
+	fullOutput?: boolean;
+	signal?: AbortSignal;
+}
+
+async function scopedToolResult(
+	detection: MulchDetectionResult,
+	args: string[],
+	config: MulchConfig,
+	runner: typeof runMulchCommand,
+	deps: RunMulchCommandDeps,
+	options: ScopedToolOptions = {},
+) {
+	const scopes = getMulchStoreScopes(detection);
+	const rendered: string[] = [];
+	const details: Array<Record<string, unknown>> = [];
+	const jsonResults: unknown[] = [];
+	let success = false;
+
+	for (const scope of scopes) {
+		const result = await runner(
+			{
+				command: detection.cliCommand,
+				args,
+				cwd: scope.commandCwd,
+				json: options.json,
+				signal: options.signal,
+			},
+			deps,
+		);
+		if (result.ok) success = true;
+		details.push(buildResultDetails(result, options.fullOutput === true));
+		if (result.json !== undefined) jsonResults.push(result.json);
+		rendered.push(renderScopedResult(scope, result));
+	}
+
+	if (rendered.length === 0) {
+		return errorToolResult("Mulch is not ready in any memory scope.");
+	}
+
+	const json = jsonResults.length === 1 ? jsonResults[0] : undefined;
+	return textToolResult(
+		rendered.join("\n\n---\n\n"),
+		config,
+		options.fullOutput,
+		{
+			command: `${detection.cliCommand} ${args.join(" ")}`.trim(),
+			success,
+			scopes: details,
+			json,
+		},
+	);
+}
+
+function renderScopedResult(
+	scope: MulchStoreScope,
+	result: Awaited<ReturnType<typeof runMulchCommand>>,
+): string {
+	const rawText = result.json
+		? JSON.stringify(result.json, null, 2)
+		: formatMulchResult(result);
+	return scope.kind === "primary" ? rawText : `## ${scope.label}\n\n${rawText}`;
+}
+
+function textToolResult(
+	rawText: string,
+	config: MulchConfig,
+	fullOutput = false,
+	extraDetails: Record<string, unknown> = {},
+) {
+	const output = fullOutput
+		? { text: rawText, truncated: false }
+		: boundMulchOutput(rawText, config.outputMaxChars);
+
+	return {
+		content: [{ type: "text" as const, text: output.text }],
+		details: {
+			...extraDetails,
+			outputTruncated: output.truncated,
+			outputChars: rawText.length,
+			outputMaxChars: fullOutput ? null : config.outputMaxChars,
+			recovery: output.truncated
+				? "Re-run the same Mulch tool with fullOutput=true for complete output."
+				: undefined,
+			json: output.truncated ? undefined : extraDetails.json,
+		},
+		isError: extraDetails.success === false,
+	};
+}
+
+function buildResultDetails(
+	result: Awaited<ReturnType<typeof runMulchCommand>>,
+	fullOutput = false,
+): Record<string, unknown> {
+	const rawText = result.json
+		? JSON.stringify(result.json, null, 2)
+		: formatMulchResult(result);
+	return {
+		command: `${result.command} ${result.args.join(" ")}`.trim(),
+		cwd: result.cwd,
+		exitCode: result.exitCode,
+		success: result.ok,
+		outputChars: rawText.length,
+		outputMaxChars: fullOutput ? null : undefined,
+		json: result.json,
 	};
 }
 

@@ -1,5 +1,9 @@
 import * as path from "node:path";
-import type { MulchDetectionResult } from "./detect.js";
+import {
+	getMulchStoreScopes,
+	type MulchDetectionResult,
+	type MulchStoreScope,
+} from "./detect.js";
 import { type RunMulchCommandDeps, runMulchCommand } from "./exec.js";
 import { toRepoRelativePath } from "./path-utils.js";
 import type {
@@ -12,9 +16,11 @@ export function buildPrimeRequest(
 	detection: MulchDetectionResult,
 	touchedFiles: readonly string[],
 	config: MulchConfig,
+	scope?: MulchStoreScope,
 ): MulchPrimeRequest {
 	const repoRoot =
-		detection.gitRepoRoot ?? path.dirname(detection.directoryPath);
+		detection.gitRepoRoot ??
+		path.dirname(scope?.directoryPath ?? detection.directoryPath);
 	const scopedFiles = touchedFiles
 		.filter((filePath) => path.isAbsolute(filePath))
 		.filter(
@@ -37,7 +43,7 @@ export function buildPrimeRequest(
 				"--format",
 				"plain",
 			],
-			signature: `files:${scopedFiles.join(",")}:${config.primeBudget}`,
+			signature: `${scope?.kind ?? "primary"}:files:${scopedFiles.join(",")}:${config.primeBudget}`,
 			scopedFiles,
 		};
 	}
@@ -52,7 +58,7 @@ export function buildPrimeRequest(
 			"--format",
 			"plain",
 		],
-		signature: `manifest:${config.primeBudget}`,
+		signature: `${scope?.kind ?? "primary"}:manifest:${config.primeBudget}`,
 		scopedFiles: [],
 	};
 }
@@ -71,35 +77,50 @@ export async function createPrimeInjection(
 		return null;
 	}
 
-	const request = buildPrimeRequest(
-		params.detection,
-		params.touchedFiles,
-		params.config,
-	);
-	const cwd = params.detection.commandCwd;
-	const result = await runner(
-		{
-			command: params.detection.cliCommand,
-			args: request.args,
-			cwd,
-			signal: params.signal,
-		},
-		deps,
-	);
+	const scopes = getMulchStoreScopes(params.detection);
+	const injections: MulchPrimeInjection[] = [];
 
-	if (!result.ok) {
-		return null;
+	for (const scope of scopes) {
+		const request = buildPrimeRequest(
+			params.detection,
+			params.touchedFiles,
+			params.config,
+			scope,
+		);
+		const result = await runner(
+			{
+				command: params.detection.cliCommand,
+				args: request.args,
+				cwd: scope.commandCwd,
+				signal: params.signal,
+			},
+			deps,
+		);
+
+		if (!result.ok) continue;
+
+		const text = result.stdout.trim();
+		if (text.length === 0) continue;
+
+		injections.push({
+			mode: request.mode,
+			signature: request.signature,
+			content: scope.kind === "primary" ? text : `## ${scope.label}\n\n${text}`,
+		});
 	}
 
-	const text = result.stdout.trim();
-	if (text.length === 0) {
+	if (injections.length === 0) {
 		return null;
 	}
 
 	return {
-		mode: request.mode,
-		signature: request.signature,
-		content: text,
+		mode: injections.some((injection) => injection.mode === "files")
+			? "files"
+			: "manifest",
+		signature: injections.map((injection) => injection.signature).join("|"),
+		content: injections
+			.map((injection) => injection.content)
+			.join("\n\n---\n\n"),
 	};
 }
 
