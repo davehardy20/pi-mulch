@@ -157,9 +157,9 @@ describe("registerMulchTools", () => {
 			?.execute("tool-capped", {}, undefined, undefined, {
 				cwd: "/repo",
 			})) as {
-				content: Array<{ text: string }>;
-				details: Record<string, unknown>;
-			};
+			content: Array<{ text: string }>;
+			details: Record<string, unknown>;
+		};
 
 		expect(capped.content[0]?.text.length).toBeLessThanOrEqual(400);
 		expect(capped.content[0]?.text).toContain("Mulch output truncated");
@@ -172,9 +172,9 @@ describe("registerMulchTools", () => {
 			?.execute("tool-full", { fullOutput: true }, undefined, undefined, {
 				cwd: "/repo",
 			})) as {
-				content: Array<{ text: string }>;
-				details: Record<string, unknown>;
-			};
+			content: Array<{ text: string }>;
+			details: Record<string, unknown>;
+		};
 
 		expect(full.content[0]?.text.length).toBeGreaterThan(1_000);
 		expect(full.content[0]?.text).toContain(largeValue);
