@@ -1,9 +1,4 @@
 import * as path from "node:path";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MULCH_CONFIG, loadMulchConfig } from "./config.js";
 import {
 	type DetectOptions,
@@ -24,6 +19,11 @@ import {
 	extractPathsFromToolResult,
 	extractPathsFromToolResultDetails,
 } from "./paths.js";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+} from "./pi-types.js";
 import { createPrimeInjection, shouldInjectPrime } from "./prime.js";
 import {
 	createMulchSessionState,
@@ -425,7 +425,7 @@ export default function mulchIntegrationExtension(
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		state.lastUserPrompt = event.prompt;
+		state.lastUserPrompt = event.prompt ?? "";
 		if (!config.enabled) return;
 
 		const detection = getDetection(ctx.cwd);

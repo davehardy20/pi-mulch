@@ -1,5 +1,3 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import {
 	getMulchStoreScopes,
 	type MulchDetectionResult,
@@ -10,7 +8,9 @@ import {
 	type RunMulchCommandDeps,
 	runMulchCommand,
 } from "./exec.js";
+import type { ExtensionAPI } from "./pi-types.js";
 import { createPrimeInjection } from "./prime.js";
+import { Type } from "./schema.js";
 import type { MulchConfig } from "./types.js";
 
 const FULL_OUTPUT_DESCRIPTION =

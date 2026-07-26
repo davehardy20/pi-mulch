@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MULCH_CONFIG } from "../src/config.js";
+import type { ExtensionAPI } from "../src/pi-types.js";
 import { registerMulchTools } from "../src/tools.js";
 
 interface RegisteredTool {

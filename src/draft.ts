@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MULCH_CONFIG } from "./config.js";
 import type { MulchDetectionResult } from "./detect.js";
 import { type RunMulchCommandDeps, runMulchCommand } from "./exec.js";
 import { resolvePathInsideRoot, toRepoRelativePath } from "./path-utils.js";
+import type { SessionEntry } from "./pi-types.js";
 import type {
 	MulchCommandResult,
 	MulchConfig,

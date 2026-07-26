@@ -1,9 +1,6 @@
 import * as path from "node:path";
-import type {
-	ToolCallEvent,
-	ToolResultEvent,
-} from "@earendil-works/pi-coding-agent";
 import { normalizePath, uriToNormalizedPath } from "./path-utils.js";
+import type { ToolCallEvent, ToolResultEvent } from "./pi-types.js";
 
 export interface TouchedFileTracker {
 	add(rawPath: string, cwd?: string): void;
