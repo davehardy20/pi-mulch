@@ -51,7 +51,7 @@ Registered by `registerMulchTools()` in `/src/tools.ts`. Only tools listed in `c
 **Parameters:**
 - `fullOutput?: boolean`
 
-**CLI invocation:** `mulch learn --json` against each detected memory scope.  
+**CLI invocation:** `mulch learn --json` once from the detected Git repository root. Learning analyzes repository changes rather than individual memory stores.  
 **Gating:** Requires `detection.ready`.
 
 ### `mulch_status`
@@ -95,7 +95,7 @@ All registered via `pi.registerCommand()` in `/src/index.ts`. Commands are **not
 | `/mulch-prime` | Runs scoped prime across global and repo-specific memories and renders output visibly (unlike the hidden `before_agent_start` injection). |
 | `/mulch-search <query>` | Runs `mulch search <query>` against all detected memory scopes. Shows usage if query is empty. |
 | `/mulch-query [domain]` | Runs `mulch query <domain>` or `mulch query --all` against all detected memory scopes. |
-| `/mulch-learn` | Runs `mulch learn` against all detected memory scopes. |
+| `/mulch-learn` | Runs `mulch learn` once from the detected Git repository root. |
 | `/mulch-status` | Shows detection JSON if no Mulch store exists; otherwise runs `mulch status` against all detected memory scopes. |
 | `/mulch-review [path]` | Opens the latest draft (or given path) in Pi's JSON editor for editing. Saves on completion. |
 

@@ -70,7 +70,7 @@ Returned by `detectMulch()`. Key fields:
 ```text
 MulchDraftFile (version: 1)
   ├── linterStatus: "unknown" | "clean" | "findings" | "error"
-  ├── touchedFiles: string[]      (repo-relative)
+  ├── touchedFiles: string[]      (absolute for global-store drafts; repo-relative for project-store drafts)
   ├── learn: unknown             (raw mulch learn output)
   ├── records: MulchDraftRecord[]
   └── appliedAt?, applyResults?  (set after apply)
@@ -81,6 +81,8 @@ MulchDraftRecord
   ├── classification?: foundational | tactical | observational
   ├── placeholder?: boolean       (true → skipped during apply)
   └── type-specific fields (see toBatchRecord in draft.ts)
+
+Global-store drafts also use absolute paths in each generated record's `files` field. Project-store drafts retain repository-relative paths.
 ```
 
 ### Record type → batch requirements (`toBatchRecord` in `/src/draft.ts`)
