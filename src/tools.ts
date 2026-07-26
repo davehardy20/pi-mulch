@@ -2,6 +2,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
+	getMulchLearnCwd,
 	getMulchStoreScopes,
 	type MulchDetectionResult,
 	type MulchStoreScope,
@@ -13,7 +14,7 @@ import {
 } from "./exec.js";
 import { toRepoRelativePath } from "./path-utils.js";
 import { createPrimeInjection } from "./prime.js";
-import type { MulchConfig } from "./types.js";
+import type { MulchCallableToolName, MulchConfig } from "./types.js";
 
 const FULL_OUTPUT_DESCRIPTION =
 	"Return the full raw Mulch output instead of the default bounded summary.";
@@ -31,6 +32,10 @@ export function registerMulchTools(
 	deps: RunMulchCommandDeps = {},
 ): void {
 	const enabled = new Set(runtime.getConfig().llmTools);
+	const isRuntimeToolEnabled = (name: MulchCallableToolName): boolean => {
+		const config = runtime.getConfig();
+		return config.enabled && config.llmTools.includes(name);
+	};
 
 	if (enabled.has("mulch_prime")) {
 		pi.registerTool({
@@ -51,6 +56,9 @@ export function registerMulchTools(
 				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+				if (!isRuntimeToolEnabled("mulch_prime")) {
+					return errorToolResult("Mulch tool is disabled by configuration.");
+				}
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.ready || !detection.cliCommand) {
 					return errorToolResult("Mulch is not ready in this repository.");
@@ -110,6 +118,9 @@ export function registerMulchTools(
 				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+				if (!isRuntimeToolEnabled("mulch_search")) {
+					return errorToolResult("Mulch tool is disabled by configuration.");
+				}
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.ready || !detection.cliCommand) {
 					return errorToolResult("Mulch is not ready in this repository.");
@@ -152,6 +163,9 @@ export function registerMulchTools(
 				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+				if (!isRuntimeToolEnabled("mulch_query")) {
+					return errorToolResult("Mulch tool is disabled by configuration.");
+				}
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.ready || !detection.cliCommand) {
 					return errorToolResult("Mulch is not ready in this repository.");
@@ -192,6 +206,9 @@ export function registerMulchTools(
 				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+				if (!isRuntimeToolEnabled("mulch_learn")) {
+					return errorToolResult("Mulch tool is disabled by configuration.");
+				}
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.ready || !detection.cliCommand) {
 					return errorToolResult("Mulch is not ready in this repository.");
@@ -226,6 +243,9 @@ export function registerMulchTools(
 				),
 			}),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+				if (!isRuntimeToolEnabled("mulch_status")) {
+					return errorToolResult("Mulch tool is disabled by configuration.");
+				}
 				const detection = runtime.getDetection(ctx.cwd);
 				if (!detection?.cliAvailable || !detection.cliCommand) {
 					return errorToolResult("Mulch CLI is not available.");
@@ -321,7 +341,7 @@ async function scopedToolResult(
 						...detectedScopes[0],
 						kind: "primary" as const,
 						label: "Repository change analysis",
-						commandCwd: detection.gitRepoRoot,
+						commandCwd: getMulchLearnCwd(detection),
 					},
 				]
 			: detectedScopes;

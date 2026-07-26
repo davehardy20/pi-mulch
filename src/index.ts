@@ -9,6 +9,7 @@ import { DEFAULT_MULCH_CONFIG, loadMulchConfig } from "./config.js";
 import {
 	type DetectOptions,
 	detectMulch,
+	getMulchLearnCwd,
 	getMulchStoreScopes,
 	type MulchDetectionResult,
 } from "./detect.js";
@@ -221,7 +222,7 @@ export default function mulchIntegrationExtension(
 							...detectedScopes[0],
 							kind: "primary" as const,
 							label: "Repository change analysis",
-							commandCwd: detection.gitRepoRoot,
+							commandCwd: getMulchLearnCwd(detection),
 						},
 					]
 				: detectedScopes;

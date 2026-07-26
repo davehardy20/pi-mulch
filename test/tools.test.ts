@@ -72,6 +72,53 @@ describe("registerMulchTools", () => {
 		expect(result.content[0]?.text).toContain('"success": true');
 	});
 
+	it("rejects tools disabled by runtime configuration", async () => {
+		const { pi, tools } = createMockPi();
+		let config = { ...DEFAULT_MULCH_CONFIG };
+		let runCount = 0;
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => config,
+				getDetection: () => ({ ...READY_DETECTION }),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				runCount += 1;
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+				};
+			},
+		);
+
+		config = { ...config, enabled: false };
+		const globallyDisabled = (await tools
+			.get("mulch_search")
+			?.execute("tool-disabled", { query: "secret" }, undefined, undefined, {
+				cwd: "/repo",
+			})) as { isError: boolean };
+		expect(globallyDisabled.isError).toBe(true);
+
+		config = {
+			...config,
+			enabled: true,
+			llmTools: config.llmTools.filter((name) => name !== "mulch_search"),
+		};
+		const toolDisabled = (await tools
+			.get("mulch_search")
+			?.execute("tool-not-allowed", { query: "secret" }, undefined, undefined, {
+				cwd: "/repo",
+			})) as { isError: boolean };
+		expect(toolDisabled.isError).toBe(true);
+		expect(runCount).toBe(0);
+	});
+
 	it("mulch_search forwards domain, file, and type params", async () => {
 		const { pi, tools } = createMockPi();
 		let capturedArgs: string[] = [];
@@ -561,7 +608,7 @@ describe("registerMulchTools", () => {
 		]);
 	});
 
-	it("runs learn from the repository for every detected scope", async () => {
+	it("runs learn once from the repository", async () => {
 		const { pi, tools } = createMockPi();
 		const calls: string[] = [];
 		registerMulchTools(
@@ -601,5 +648,51 @@ describe("registerMulchTools", () => {
 			?.execute("tool-learn-repo", {}, undefined, undefined, { cwd: "/repo" });
 
 		expect(calls).toEqual(["/repo"]);
+	});
+
+	it("runs learn from the detected project cwd in linked worktrees", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[] = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/main/.mulch",
+					commandCwd: "/main",
+					isWorktree: true,
+					mainWorktreeRoot: "/main",
+					globalDirectoryExists: false,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/main/.mulch",
+					projectCommandCwd: "/main",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.cwd);
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_learn")
+			?.execute("tool-learn-worktree", {}, undefined, undefined, {
+				cwd: "/repo",
+			});
+
+		expect(calls).toEqual(["/main"]);
 	});
 });

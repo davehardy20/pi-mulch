@@ -132,6 +132,13 @@ export function detectMulch(
 	};
 }
 
+export function getMulchLearnCwd(detection: MulchDetectionResult): string {
+	if (detection.globalDirectoryExists === false) {
+		return detection.projectCommandCwd ?? detection.commandCwd;
+	}
+	return detection.gitRepoRoot ?? detection.commandCwd;
+}
+
 export function getMulchStoreScopes(
 	detection: MulchDetectionResult,
 ): MulchStoreScope[] {

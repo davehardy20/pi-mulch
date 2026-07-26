@@ -1051,6 +1051,48 @@ describe("session lifecycle", () => {
 			expect(calls).toEqual([repoRoot]);
 		});
 
+		it("runs /mulch-learn from the project cwd in linked worktrees", async () => {
+			const repoRoot = makeTempDir();
+			const mainRoot = makeTempDir();
+			const homeRoot = makeTempDir();
+			const { pi, commands } = createMockPi();
+			const calls: string[] = [];
+
+			mulchIntegrationExtension(pi, {
+				loadConfig: () => DEFAULT_MULCH_CONFIG,
+				detectMulch: () => ({
+					...readyDetection(repoRoot),
+					directoryPath: path.join(mainRoot, ".mulch"),
+					commandCwd: mainRoot,
+					isWorktree: true,
+					mainWorktreeRoot: mainRoot,
+					globalDirectoryExists: false,
+					globalDirectoryPath: path.join(homeRoot, ".mulch"),
+					globalCommandCwd: homeRoot,
+					projectDirectoryExists: true,
+					projectDirectoryPath: path.join(mainRoot, ".mulch"),
+					projectCommandCwd: mainRoot,
+				}),
+				runMulchCommand: vi.fn(async (options: RunMulchCommandOptions) => {
+					calls.push(options.cwd);
+					return {
+						command: options.command ?? "mulch",
+						args: options.args,
+						cwd: options.cwd,
+						exitCode: 0,
+						stdout: "{}",
+						stderr: "",
+						ok: true,
+						json: {},
+					};
+				}),
+			});
+
+			await commands.get("mulch-learn")?.handler("", createCtx(repoRoot));
+
+			expect(calls).toEqual([mainRoot]);
+		});
+
 		it("falls back to repository drafts for review and apply", async () => {
 			const repoRoot = makeTempDir();
 			const homeRoot = makeTempDir();
