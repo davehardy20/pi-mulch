@@ -293,6 +293,29 @@ export default function mulchIntegrationExtension(
 		}
 	}
 
+	function findLatestDetectedDraft(
+		detection: MulchDetectionResult,
+	): string | null {
+		if (!detection.gitRepoRoot) return null;
+		const storeDirectories = [
+			detection.directoryPath,
+			detection.projectDirectoryExists
+				? detection.projectDirectoryPath
+				: undefined,
+		].filter((directory): directory is string => Boolean(directory));
+
+		for (const directory of new Set(storeDirectories)) {
+			const draftPath = findLatestDraft(
+				path.dirname(directory),
+				config,
+				{},
+				detection.gitRepoRoot,
+			);
+			if (draftPath) return draftPath;
+		}
+		return null;
+	}
+
 	async function commandReview(
 		ctx: ExtensionCommandContext,
 		args: string,
@@ -303,15 +326,7 @@ export default function mulchIntegrationExtension(
 			return;
 		}
 
-		const draftPath =
-			args.trim() ||
-			findLatestDraft(
-				path.dirname(detection.directoryPath),
-				config,
-				{},
-				detection.gitRepoRoot,
-			) ||
-			"";
+		const draftPath = args.trim() || findLatestDetectedDraft(detection) || "";
 		if (!draftPath) {
 			sendVisibleMessage("No Mulch draft was found.");
 			return;
@@ -352,15 +367,7 @@ export default function mulchIntegrationExtension(
 			return;
 		}
 
-		const draftPath =
-			args.trim() ||
-			findLatestDraft(
-				path.dirname(detection.directoryPath),
-				config,
-				{},
-				detection.gitRepoRoot,
-			) ||
-			"";
+		const draftPath = args.trim() || findLatestDetectedDraft(detection) || "";
 		if (!draftPath) {
 			sendVisibleMessage("No Mulch draft was found.");
 			return;

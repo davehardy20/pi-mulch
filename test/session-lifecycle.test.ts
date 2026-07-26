@@ -1050,5 +1050,57 @@ describe("session lifecycle", () => {
 
 			expect(calls).toEqual([repoRoot]);
 		});
+
+		it("falls back to repository drafts for review and apply", async () => {
+			const repoRoot = makeTempDir();
+			const homeRoot = makeTempDir();
+			const projectDraftDir = path.join(repoRoot, ".mulch", "drafts");
+			fs.mkdirSync(projectDraftDir, { recursive: true });
+			const draftPath = path.join(projectDraftDir, "project-draft.json");
+			fs.writeFileSync(
+				draftPath,
+				JSON.stringify({
+					version: 1,
+					createdAt: new Date().toISOString(),
+					repoRoot,
+					linterStatus: "clean",
+					lastUserPrompt: "project draft",
+					touchedFiles: ["src/index.ts"],
+					learn: {},
+					records: [],
+				}),
+			);
+			const { pi, commands, sentMessages } = createMockPi();
+
+			mulchIntegrationExtension(pi, {
+				loadConfig: () => DEFAULT_MULCH_CONFIG,
+				detectMulch: () => ({
+					...readyDetection(repoRoot),
+					directoryPath: path.join(homeRoot, ".mulch"),
+					commandCwd: homeRoot,
+					globalDirectoryExists: true,
+					globalDirectoryPath: path.join(homeRoot, ".mulch"),
+					globalCommandCwd: homeRoot,
+					projectDirectoryExists: true,
+					projectDirectoryPath: path.join(repoRoot, ".mulch"),
+					projectCommandCwd: repoRoot,
+				}),
+				runMulchCommand: vi.fn(),
+			});
+
+			await commands
+				.get("mulch-review")
+				?.handler("", createCtx(repoRoot, { hasUI: false }));
+
+			expect(sentMessages.at(-1)?.details).toEqual({ draftPath });
+			expect(sentMessages.at(-1)?.content).toContain("project draft");
+
+			const applyCtx = createCtx(repoRoot, { confirm: false });
+			await commands.get("mulch-apply")?.handler("", applyCtx);
+			expect(applyCtx.ui.editor).toHaveBeenCalledWith(
+				"Review Mulch draft before apply",
+				expect.stringContaining("project draft"),
+			);
+		});
 	});
 });
