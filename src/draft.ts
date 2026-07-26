@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -113,7 +114,10 @@ export function writeDraftFile(
 	mkdirSync(draftDir, { recursive: true });
 
 	const stamp = draft.createdAt.replace(/[.:]/g, "-");
-	const filePath = path.join(draftDir, `pi-mulch-draft-${stamp}.json`);
+	const filePath = path.join(
+		draftDir,
+		`pi-mulch-draft-${stamp}-${randomUUID()}.json`,
+	);
 	writeFileSync(filePath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
 	return filePath;
 }
@@ -223,11 +227,15 @@ export async function maybeWriteSessionDraft(
 		return null;
 	}
 
+	const learnCwd =
+		params.detection.globalDirectoryExists === false
+			? (params.detection.projectCommandCwd ?? params.detection.commandCwd)
+			: repoRoot;
 	const learnResult = await runner(
 		{
 			command: params.detection.cliCommand,
 			args: ["learn"],
-			cwd: repoRoot,
+			cwd: learnCwd,
 			json: true,
 			signal: params.signal,
 		},

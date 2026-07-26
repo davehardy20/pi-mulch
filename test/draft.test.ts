@@ -263,6 +263,59 @@ describe("maybeWriteSessionDraft", () => {
 		expect(draft.touchedFiles).toEqual(["src/index.ts"]);
 		expect(draft.records[0]?.files).toEqual(["src/index.ts"]);
 	});
+
+	it("uses the detected project cwd for linked-worktree learning", async () => {
+		const linkedRoot = makeTempDir();
+		const mainRoot = makeTempDir();
+		let learnCwd: string | undefined;
+
+		const draftPath = await maybeWriteSessionDraft(
+			{
+				detection: {
+					...readyDetection(linkedRoot),
+					directoryPath: path.join(mainRoot, ".mulch"),
+					commandCwd: mainRoot,
+					isWorktree: true,
+					mainWorktreeRoot: mainRoot,
+					globalDirectoryExists: false,
+					globalDirectoryPath: path.join(makeTempDir(), ".mulch"),
+					projectDirectoryExists: true,
+					projectDirectoryPath: path.join(mainRoot, ".mulch"),
+					projectCommandCwd: mainRoot,
+				},
+				config: DEFAULT_MULCH_CONFIG,
+				sessionManager: {
+					getEntries: () => [
+						{
+							type: "custom_message",
+							customType: "post-turn-linter-status",
+							details: { status: "clean" },
+						},
+					],
+				} as never,
+				touchedFiles: [path.join(linkedRoot, "src/index.ts")],
+				lastUserPrompt: "linked worktree change",
+			},
+			async (options) => {
+				learnCwd = options.cwd;
+				return {
+					command: "mulch",
+					args: ["learn"],
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		expect(learnCwd).toBe(mainRoot);
+		expect(draftPath?.startsWith(path.join(mainRoot, ".mulch", "drafts"))).toBe(
+			true,
+		);
+	});
 });
 
 describe("applyDraftFile", () => {
@@ -684,5 +737,26 @@ describe("maybeWriteSessionDraft safety", () => {
 		expect(fs.existsSync(path.resolve(repoRoot, "../outside-drafts"))).toBe(
 			false,
 		);
+	});
+
+	it("uses unique filenames for simultaneous shared-store drafts", () => {
+		const storeRoot = makeTempDir();
+		const draft = {
+			version: 1 as const,
+			createdAt: "2026-07-26T16:36:31.123Z",
+			repoRoot: "/repo",
+			linterStatus: "clean" as const,
+			lastUserPrompt: "ship it",
+			touchedFiles: ["/repo/src/index.ts"],
+			learn: {},
+			records: [],
+		};
+
+		const first = writeDraftFile(storeRoot, DEFAULT_MULCH_CONFIG, draft);
+		const second = writeDraftFile(storeRoot, DEFAULT_MULCH_CONFIG, draft);
+
+		expect(second).not.toBe(first);
+		expect(fs.existsSync(first)).toBe(true);
+		expect(fs.existsSync(second)).toBe(true);
 	});
 });
