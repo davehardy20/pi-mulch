@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MULCH_CONFIG } from "./config.js";
-import type { MulchDetectionResult } from "./detect.js";
+import { getMulchLearnCwd, type MulchDetectionResult } from "./detect.js";
 import { type RunMulchCommandDeps, runMulchCommand } from "./exec.js";
 import { resolvePathInsideRoot, toRepoRelativePath } from "./path-utils.js";
 import type {
@@ -57,12 +58,15 @@ export function getLatestLinterStatus(
 	return "unknown";
 }
 
+type DraftFilePathMode = "repo-relative" | "absolute";
+
 export function buildDraftFile(params: {
 	repoRoot: string;
 	linterStatus: MulchLinterStatus;
 	touchedFiles: readonly string[];
 	lastUserPrompt: string;
 	learn: unknown;
+	filePathMode?: DraftFilePathMode;
 }): MulchDraftFile {
 	const learnRecord = asRecord(params.learn);
 	const suggestedDomains = Array.isArray(learnRecord?.suggestedDomains)
@@ -75,8 +79,12 @@ export function buildDraftFile(params: {
 	const relativeFiles = params.touchedFiles
 		.map((filePath) => toRepoRelativePath(filePath, params.repoRoot))
 		.filter((filePath) => filePath !== ".");
+	const draftFiles =
+		params.filePathMode === "absolute"
+			? relativeFiles.map((filePath) => path.join(params.repoRoot, filePath))
+			: relativeFiles;
 
-	const records = buildPlaceholderRecords(suggestedDomains, relativeFiles);
+	const records = buildPlaceholderRecords(suggestedDomains, draftFiles);
 
 	return {
 		version: 1,
@@ -84,7 +92,7 @@ export function buildDraftFile(params: {
 		repoRoot: params.repoRoot,
 		linterStatus: params.linterStatus,
 		lastUserPrompt: params.lastUserPrompt,
-		touchedFiles: relativeFiles,
+		touchedFiles: draftFiles,
 		learn: params.learn,
 		records,
 	};
@@ -106,7 +114,10 @@ export function writeDraftFile(
 	mkdirSync(draftDir, { recursive: true });
 
 	const stamp = draft.createdAt.replace(/[.:]/g, "-");
-	const filePath = path.join(draftDir, `pi-mulch-draft-${stamp}.json`);
+	const filePath = path.join(
+		draftDir,
+		`pi-mulch-draft-${stamp}-${randomUUID()}.json`,
+	);
 	writeFileSync(filePath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
 	return filePath;
 }
@@ -115,9 +126,11 @@ export function findLatestDraft(
 	repoRoot: string,
 	config: MulchConfig,
 	deps: DraftFsDeps = {},
+	targetRepoRoot?: string,
 ): string | null {
 	const existsSync = deps.existsSync ?? fs.existsSync;
 	const readdirSync = deps.readdirSync ?? fs.readdirSync;
+	const readFileSync = deps.readFileSync ?? fs.readFileSync;
 	const statSync = deps.statSync ?? fs.statSync;
 	const draftDir = resolvePathInsideRoot(
 		repoRoot,
@@ -133,7 +146,22 @@ export function findLatestDraft(
 		.map((entry) => path.join(draftDir, entry))
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
 
-	return candidates[0] ?? null;
+	if (!targetRepoRoot) {
+		return candidates[0] ?? null;
+	}
+
+	return (
+		candidates.find((candidate) => {
+			try {
+				const draft = JSON.parse(
+					readFileSync(candidate, "utf8"),
+				) as MulchDraftFile;
+				return draft.repoRoot === targetRepoRoot;
+			} catch {
+				return false;
+			}
+		}) ?? null
+	);
 }
 
 export function loadDraftFile(
@@ -157,6 +185,12 @@ export function getActionableDraftRecords(
 	draft: MulchDraftFile,
 ): MulchDraftRecord[] {
 	return draft.records.filter((record) => toBatchRecord(record) !== null);
+}
+
+function getPrimaryMulchCommandCwd(detection: MulchDetectionResult): string {
+	return detection.globalDirectoryExists && detection.globalCommandCwd
+		? detection.globalCommandCwd
+		: detection.commandCwd;
 }
 
 export async function maybeWriteSessionDraft(
@@ -184,7 +218,7 @@ export async function maybeWriteSessionDraft(
 	}
 
 	const repoRoot = params.detection.gitRepoRoot;
-	const mulchRoot = params.detection.commandCwd;
+	const draftStoreRoot = getPrimaryMulchCommandCwd(params.detection);
 	const repoFiles = params.touchedFiles.filter(
 		(filePath) =>
 			filePath === repoRoot || filePath.startsWith(`${repoRoot}${path.sep}`),
@@ -193,11 +227,12 @@ export async function maybeWriteSessionDraft(
 		return null;
 	}
 
+	const learnCwd = getMulchLearnCwd(params.detection);
 	const learnResult = await runner(
 		{
 			command: params.detection.cliCommand,
 			args: ["learn"],
-			cwd: mulchRoot,
+			cwd: learnCwd,
 			json: true,
 			signal: params.signal,
 		},
@@ -213,9 +248,12 @@ export async function maybeWriteSessionDraft(
 		touchedFiles: repoFiles,
 		lastUserPrompt: params.lastUserPrompt,
 		learn: learnResult.json ?? learnResult.stdout,
+		filePathMode: params.detection.globalDirectoryExists
+			? "absolute"
+			: "repo-relative",
 	});
 
-	return writeDraftFile(mulchRoot, params.config, draft, deps);
+	return writeDraftFile(draftStoreRoot, params.config, draft, deps);
 }
 
 export async function applyDraftFile(
@@ -223,6 +261,7 @@ export async function applyDraftFile(
 	params: {
 		command: string | null;
 		cwd: string;
+		filePathMode?: DraftFilePathMode;
 	},
 	runner: typeof runMulchCommand = runMulchCommand,
 	deps: RunMulchCommandDeps & DraftFsDeps = {},
@@ -237,7 +276,14 @@ export async function applyDraftFile(
 	const draft = loadDraftFile(filePath, deps);
 	const grouped = new Map<string, Array<Record<string, unknown>>>();
 	for (const record of draft.records) {
-		const normalized = toBatchRecord(record);
+		const normalized = toBatchRecord({
+			...record,
+			files: normalizeDraftFiles(
+				record.files,
+				draft.repoRoot,
+				params.filePathMode ?? "repo-relative",
+			),
+		});
 		if (normalized === null) continue;
 		const batch = grouped.get(record.domain) ?? [];
 		batch.push(normalized);
@@ -298,6 +344,24 @@ function buildPlaceholderRecords(
 	}));
 }
 
+function normalizeDraftFiles(
+	files: readonly string[] | undefined,
+	repoRoot: string,
+	mode: DraftFilePathMode,
+): string[] | undefined {
+	if (!files) return undefined;
+	return files.map((filePath) => {
+		if (mode === "absolute") {
+			return path.isAbsolute(filePath)
+				? path.normalize(filePath)
+				: path.resolve(repoRoot, filePath);
+		}
+		return path.isAbsolute(filePath)
+			? toRepoRelativePath(filePath, repoRoot)
+			: filePath;
+	});
+}
+
 function toBatchRecord(
 	record: MulchDraftRecord,
 ): Record<string, unknown> | null {
@@ -313,9 +377,7 @@ function toBatchRecord(
 		case "convention": {
 			const content = record.content ?? record.description;
 			if (!content) return null;
-			const base: Record<string, unknown> = { type, content };
-			if (record.classification) base.classification = record.classification;
-			return base;
+			return withOptionalFields({ type, content }, record);
 		}
 		case "decision":
 			if (!record.title || !record.rationale) return null;

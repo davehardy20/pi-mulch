@@ -72,6 +72,53 @@ describe("registerMulchTools", () => {
 		expect(result.content[0]?.text).toContain('"success": true');
 	});
 
+	it("rejects tools disabled by runtime configuration", async () => {
+		const { pi, tools } = createMockPi();
+		let config = { ...DEFAULT_MULCH_CONFIG };
+		let runCount = 0;
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => config,
+				getDetection: () => ({ ...READY_DETECTION }),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				runCount += 1;
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+				};
+			},
+		);
+
+		config = { ...config, enabled: false };
+		const globallyDisabled = (await tools
+			.get("mulch_search")
+			?.execute("tool-disabled", { query: "secret" }, undefined, undefined, {
+				cwd: "/repo",
+			})) as { isError: boolean };
+		expect(globallyDisabled.isError).toBe(true);
+
+		config = {
+			...config,
+			enabled: true,
+			llmTools: config.llmTools.filter((name) => name !== "mulch_search"),
+		};
+		const toolDisabled = (await tools
+			.get("mulch_search")
+			?.execute("tool-not-allowed", { query: "secret" }, undefined, undefined, {
+				cwd: "/repo",
+			})) as { isError: boolean };
+		expect(toolDisabled.isError).toBe(true);
+		expect(runCount).toBe(0);
+	});
+
 	it("mulch_search forwards domain, file, and type params", async () => {
 		const { pi, tools } = createMockPi();
 		let capturedArgs: string[] = [];
@@ -129,6 +176,47 @@ describe("registerMulchTools", () => {
 		]);
 	});
 
+	it("resolves relative mulch_prime files from the repository", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[][] = [];
+
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({ ...READY_DETECTION }),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.args);
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "prime context",
+					stderr: "",
+					ok: true,
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_prime")
+			?.execute(
+				"tool-relative-prime",
+				{ files: ["src/index.ts"] },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toContain("--files");
+		expect(calls[0]).toContain("src/index.ts");
+		expect(calls[0]).not.toContain("--manifest");
+	});
+
 	it("caps oversized default Mulch tool output and keeps full output recoverable", async () => {
 		const { pi, tools } = createMockPi();
 		const largeValue = "x".repeat(2_000);
@@ -157,14 +245,17 @@ describe("registerMulchTools", () => {
 			?.execute("tool-capped", {}, undefined, undefined, {
 				cwd: "/repo",
 			})) as {
-				content: Array<{ text: string }>;
-				details: Record<string, unknown>;
-			};
+			content: Array<{ text: string }>;
+			details: Record<string, unknown>;
+		};
 
 		expect(capped.content[0]?.text.length).toBeLessThanOrEqual(400);
 		expect(capped.content[0]?.text).toContain("Mulch output truncated");
 		expect(capped.details.outputTruncated).toBe(true);
 		expect(capped.details.json).toBeUndefined();
+		expect(
+			(capped.details.scopes as Array<Record<string, unknown>>)[0]?.json,
+		).toBeUndefined();
 		expect(capped.details.recovery).toContain("fullOutput=true");
 
 		const full = (await tools
@@ -172,14 +263,17 @@ describe("registerMulchTools", () => {
 			?.execute("tool-full", { fullOutput: true }, undefined, undefined, {
 				cwd: "/repo",
 			})) as {
-				content: Array<{ text: string }>;
-				details: Record<string, unknown>;
-			};
+			content: Array<{ text: string }>;
+			details: Record<string, unknown>;
+		};
 
 		expect(full.content[0]?.text.length).toBeGreaterThan(1_000);
 		expect(full.content[0]?.text).toContain(largeValue);
 		expect(full.details.outputTruncated).toBe(false);
 		expect(full.details.json).toEqual({ records: [{ content: largeValue }] });
+		expect(
+			(full.details.scopes as Array<Record<string, unknown>>)[0]?.json,
+		).toEqual({ records: [{ content: largeValue }] });
 	});
 
 	it("mulch_search returns error result when Mulch is not ready", async () => {
@@ -342,5 +436,263 @@ describe("registerMulchTools", () => {
 		expect(result.details.success).toBe(false);
 		expect(result.content[0]?.text).toContain("Command: mulch search bad");
 		expect(result.content[0]?.text).toContain("Exit code: 1");
+	});
+
+	it("aggregates multi-scope JSON and partial success details", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[] = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+					globalDirectoryExists: true,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/repo/.mulch",
+					projectCommandCwd: "/repo",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.cwd);
+				const isGlobal = options.cwd === "/home/user";
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: isGlobal ? 0 : 1,
+					stdout: JSON.stringify({ scope: isGlobal ? "global" : "project" }),
+					stderr: isGlobal ? "" : "project failed",
+					ok: isGlobal,
+					json: { scope: isGlobal ? "global" : "project" },
+				};
+			},
+		);
+
+		const result = (await tools
+			.get("mulch_search")
+			?.execute("tool-scopes", { query: "hooks" }, undefined, undefined, {
+				cwd: "/repo",
+			})) as {
+			isError: boolean;
+			details: {
+				success: boolean;
+				scopes: Array<Record<string, unknown>>;
+				json: { scopes: Array<Record<string, unknown>> };
+			};
+			content: Array<{ text: string }>;
+		};
+
+		expect(calls).toEqual(["/home/user", "/repo"]);
+		expect(result.isError).toBe(false);
+		expect(result.details.success).toBe(true);
+		expect(result.details.scopes).toMatchObject([
+			{ kind: "global", success: true, cwd: "/home/user" },
+			{ kind: "project", success: false, cwd: "/repo" },
+		]);
+		expect(result.details.json).toEqual({
+			scopes: [
+				{
+					kind: "global",
+					label: "Global Mulch memories (~/.mulch)",
+					json: { scope: "global" },
+				},
+				{
+					kind: "project",
+					label: "Repository-specific Mulch memories (.mulch)",
+					json: { scope: "project" },
+				},
+			],
+		});
+		expect(result.content[0]?.text).toContain(
+			"## Global Mulch memories (~/.mulch)",
+		);
+		expect(result.content[0]?.text).toContain(
+			"## Repository-specific Mulch memories (.mulch)",
+		);
+	});
+
+	it("translates file filters for global and project scopes", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: Array<{ cwd: string; args: string[] }> = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+					globalDirectoryExists: true,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/repo/.mulch",
+					projectCommandCwd: "/repo",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push({ cwd: options.cwd, args: options.args });
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_search")
+			?.execute(
+				"tool-search-files",
+				{ query: "hooks", file: "src/index.ts" },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+		await tools
+			.get("mulch_query")
+			?.execute(
+				"tool-query-files",
+				{ file: "/repo/src/index.ts" },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+		await tools
+			.get("mulch_query")
+			?.execute(
+				"tool-query-outside",
+				{ file: "/other/shared.ts" },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+
+		expect(calls).toEqual([
+			{
+				cwd: "/home/user",
+				args: ["search", "hooks", "--file", "/repo/src/index.ts"],
+			},
+			{
+				cwd: "/repo",
+				args: ["search", "hooks", "--file", "src/index.ts"],
+			},
+			{
+				cwd: "/home/user",
+				args: ["query", "--file", "/repo/src/index.ts"],
+			},
+			{
+				cwd: "/repo",
+				args: ["query", "--file", "src/index.ts"],
+			},
+			{
+				cwd: "/home/user",
+				args: ["query", "--file", "/other/shared.ts"],
+			},
+			{
+				cwd: "/repo",
+				args: ["query", "--file", "../other/shared.ts"],
+			},
+		]);
+	});
+
+	it("runs learn once from the repository", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[] = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+					globalDirectoryExists: true,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/repo/.mulch",
+					projectCommandCwd: "/repo",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.cwd);
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_learn")
+			?.execute("tool-learn-repo", {}, undefined, undefined, { cwd: "/repo" });
+
+		expect(calls).toEqual(["/repo"]);
+	});
+
+	it("runs learn from the detected project cwd in linked worktrees", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[] = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/main/.mulch",
+					commandCwd: "/main",
+					isWorktree: true,
+					mainWorktreeRoot: "/main",
+					globalDirectoryExists: false,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/main/.mulch",
+					projectCommandCwd: "/main",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.cwd);
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_learn")
+			?.execute("tool-learn-worktree", {}, undefined, undefined, {
+				cwd: "/repo",
+			});
+
+		expect(calls).toEqual(["/main"]);
 	});
 });

@@ -1,12 +1,30 @@
 import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+
+export type MulchStoreScopeKind = "global" | "project" | "primary";
+
+export interface MulchStoreScope {
+	kind: MulchStoreScopeKind;
+	label: string;
+	directoryPath: string;
+	commandCwd: string;
+}
 
 export interface MulchDetectionResult {
 	cliAvailable: boolean;
 	cliCommand: string | null;
+	/** True when either the global store or a repository-specific store exists. */
 	directoryExists: boolean;
+	/** The primary store path. Prefers ~/.mulch, falls back to repository .mulch/. */
 	directoryPath: string;
+	globalDirectoryExists?: boolean;
+	globalDirectoryPath?: string;
+	globalCommandCwd?: string;
+	projectDirectoryExists?: boolean;
+	projectDirectoryPath?: string;
+	projectCommandCwd?: string;
 	/** True when the detected root is a git worktree (linked .git file). */
 	isWorktree: boolean;
 	/**
@@ -16,6 +34,8 @@ export interface MulchDetectionResult {
 	mainWorktreeRoot: string | null;
 	isGitRepo: boolean;
 	gitRepoRoot: string | null;
+	/** Pi's original working directory, retained when the global store changes commandCwd. */
+	workingDirectory?: string;
 	/**
 	 * The working directory to use when invoking mulch CLI commands.
 	 * Normally equals `gitRepoRoot`, but when `.mulch/` was found in the
@@ -57,6 +77,9 @@ export function detectMulch(
 	const gitRepoRoot = findGitRepoRoot(cwd, execFileSync);
 	const isGitRepo = gitRepoRoot !== null;
 	const repoRoot = gitRepoRoot ?? cwd;
+	const globalCommandCwd = os.homedir();
+	const globalDirectoryPath = path.resolve(globalCommandCwd, ".mulch");
+	const globalDirectoryExists = isDirectory(globalDirectoryPath, statSync);
 
 	// Detect worktree: the main working tree root is derived from
 	// --git-common-dir which points to the primary .git directory.
@@ -65,22 +88,29 @@ export function detectMulch(
 		execFileSync,
 	);
 
-	// Resolve .mulch/ in the detected repo root first.
-	// If not found and we are in a worktree, fall back to the main
-	// working tree so a shared .mulch/ is discovered.
-	let directoryPath = path.resolve(repoRoot, ".mulch");
-	let directoryExists = isDirectory(directoryPath, statSync);
-	let commandCwd = repoRoot;
+	// Resolve repository-specific .mulch/ if it already exists. This is kept
+	// as a read scope for older project memories, while ~/.mulch is the primary
+	// global store for all normal Mulch operations.
+	let projectDirectoryPath = path.resolve(repoRoot, ".mulch");
+	let projectDirectoryExists = isDirectory(projectDirectoryPath, statSync);
+	let projectCommandCwd = repoRoot;
 
-	if (!directoryExists && isWorktree && mainWorktreeRoot) {
+	if (!projectDirectoryExists && isWorktree && mainWorktreeRoot) {
 		const mainMulchPath = path.resolve(mainWorktreeRoot, ".mulch");
 		if (isDirectory(mainMulchPath, statSync)) {
-			directoryPath = mainMulchPath;
-			directoryExists = true;
-			commandCwd = mainWorktreeRoot;
+			projectDirectoryPath = mainMulchPath;
+			projectDirectoryExists = true;
+			projectCommandCwd = mainWorktreeRoot;
 		}
 	}
 
+	const directoryExists = globalDirectoryExists || projectDirectoryExists;
+	const directoryPath = globalDirectoryExists
+		? globalDirectoryPath
+		: projectDirectoryPath;
+	const commandCwd = globalDirectoryExists
+		? globalCommandCwd
+		: projectCommandCwd;
 	const cliCommand = resolveCliCommand(options, execFileSync);
 	const cliAvailable = cliCommand !== null;
 
@@ -89,13 +119,61 @@ export function detectMulch(
 		cliCommand,
 		directoryExists,
 		directoryPath,
+		globalDirectoryExists,
+		globalDirectoryPath,
+		globalCommandCwd,
+		projectDirectoryExists,
+		projectDirectoryPath,
+		projectCommandCwd,
 		isWorktree,
 		mainWorktreeRoot,
 		isGitRepo,
 		gitRepoRoot,
+		workingDirectory: cwd,
 		commandCwd,
 		ready: cliAvailable && directoryExists,
 	};
+}
+
+export function getMulchLearnCwd(detection: MulchDetectionResult): string {
+	if (detection.globalDirectoryExists === false) {
+		return detection.projectCommandCwd ?? detection.commandCwd;
+	}
+	return detection.gitRepoRoot ?? detection.commandCwd;
+}
+
+export function getMulchStoreScopes(
+	detection: MulchDetectionResult,
+): MulchStoreScope[] {
+	const scopes: MulchStoreScope[] = [];
+	if (detection.globalDirectoryExists) {
+		scopes.push({
+			kind: "global",
+			label: "Global Mulch memories (~/.mulch)",
+			directoryPath: detection.globalDirectoryPath ?? detection.directoryPath,
+			commandCwd: detection.globalCommandCwd ?? detection.commandCwd,
+		});
+	}
+	if (
+		detection.projectDirectoryExists &&
+		detection.projectDirectoryPath !== detection.globalDirectoryPath
+	) {
+		scopes.push({
+			kind: "project",
+			label: "Repository-specific Mulch memories (.mulch)",
+			directoryPath: detection.projectDirectoryPath ?? detection.directoryPath,
+			commandCwd: detection.projectCommandCwd ?? detection.commandCwd,
+		});
+	}
+	if (scopes.length === 0 && detection.directoryExists) {
+		scopes.push({
+			kind: "primary",
+			label: "Mulch memories",
+			directoryPath: detection.directoryPath,
+			commandCwd: detection.commandCwd,
+		});
+	}
+	return scopes;
 }
 
 /**
