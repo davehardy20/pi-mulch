@@ -220,7 +220,10 @@ export default function mulchIntegrationExtension(
 			const result = await runMulch({
 				command: detection.cliCommand,
 				args,
-				cwd: scope.commandCwd,
+				cwd:
+					args[0] === "learn"
+						? (detection.gitRepoRoot ?? scope.commandCwd)
+						: scope.commandCwd,
 				json,
 			});
 			if (result.ok) success = true;
@@ -382,6 +385,9 @@ export default function mulchIntegrationExtension(
 			{
 				command: detection.cliCommand,
 				cwd: detection.commandCwd,
+				filePathMode: detection.globalDirectoryExists
+					? "absolute"
+					: "repo-relative",
 			},
 			runMulch,
 		);

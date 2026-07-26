@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -10,6 +11,7 @@ import {
 	type RunMulchCommandDeps,
 	runMulchCommand,
 } from "./exec.js";
+import { toRepoRelativePath } from "./path-utils.js";
 import { createPrimeInjection } from "./prime.js";
 import type { MulchConfig } from "./types.js";
 
@@ -275,6 +277,32 @@ interface ScopedToolOptions {
 	signal?: AbortSignal;
 }
 
+function translateFileFilter(
+	args: readonly string[],
+	scope: MulchStoreScope,
+	detection: MulchDetectionResult,
+): string[] {
+	const translated = [...args];
+	const fileFlagIndex = translated.indexOf("--file");
+	const fileValue = translated[fileFlagIndex + 1];
+	const repoRoot = detection.gitRepoRoot;
+	if (fileFlagIndex < 0 || !fileValue || !repoRoot) {
+		return translated;
+	}
+
+	if (scope.kind === "global") {
+		translated[fileFlagIndex + 1] = path.isAbsolute(fileValue)
+			? path.normalize(fileValue)
+			: path.resolve(repoRoot, fileValue);
+		return translated;
+	}
+
+	if (scope.kind === "project" && path.isAbsolute(fileValue)) {
+		translated[fileFlagIndex + 1] = toRepoRelativePath(fileValue, repoRoot);
+	}
+	return translated;
+}
+
 async function scopedToolResult(
 	detection: MulchDetectionResult,
 	args: string[],
@@ -290,11 +318,15 @@ async function scopedToolResult(
 	let success = false;
 
 	for (const scope of scopes) {
+		const scopedArgs = translateFileFilter(args, scope, detection);
 		const result = await runner(
 			{
 				command: detection.cliCommand,
-				args,
-				cwd: scope.commandCwd,
+				args: scopedArgs,
+				cwd:
+					args[0] === "learn"
+						? (detection.gitRepoRoot ?? scope.commandCwd)
+						: scope.commandCwd,
 				json: options.json,
 				signal: options.signal,
 			},

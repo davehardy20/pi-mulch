@@ -1010,4 +1010,45 @@ describe("session lifecycle", () => {
 			expect(ctx2.ui.confirm).toHaveBeenCalled();
 		});
 	});
+
+	describe("commands", () => {
+		it("runs /mulch-learn from the repository for every scope", async () => {
+			const repoRoot = makeTempDir();
+			const homeRoot = makeTempDir();
+			const { pi, commands } = createMockPi();
+			const calls: string[] = [];
+
+			mulchIntegrationExtension(pi, {
+				loadConfig: () => DEFAULT_MULCH_CONFIG,
+				detectMulch: () => ({
+					...readyDetection(repoRoot),
+					directoryPath: path.join(homeRoot, ".mulch"),
+					commandCwd: homeRoot,
+					globalDirectoryExists: true,
+					globalDirectoryPath: path.join(homeRoot, ".mulch"),
+					globalCommandCwd: homeRoot,
+					projectDirectoryExists: true,
+					projectDirectoryPath: path.join(repoRoot, ".mulch"),
+					projectCommandCwd: repoRoot,
+				}),
+				runMulchCommand: vi.fn(async (options: RunMulchCommandOptions) => {
+					calls.push(options.cwd);
+					return {
+						command: options.command ?? "mulch",
+						args: options.args,
+						cwd: options.cwd,
+						exitCode: 0,
+						stdout: "{}",
+						stderr: "",
+						ok: true,
+						json: {},
+					};
+				}),
+			});
+
+			await commands.get("mulch-learn")?.handler("", createCtx(repoRoot));
+
+			expect(calls).toEqual([repoRoot, repoRoot]);
+		});
+	});
 });

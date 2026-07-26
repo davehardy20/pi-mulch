@@ -422,4 +422,137 @@ describe("registerMulchTools", () => {
 			"## Repository-specific Mulch memories (.mulch)",
 		);
 	});
+
+	it("translates file filters for global and project scopes", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: Array<{ cwd: string; args: string[] }> = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+					globalDirectoryExists: true,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/repo/.mulch",
+					projectCommandCwd: "/repo",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push({ cwd: options.cwd, args: options.args });
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_search")
+			?.execute(
+				"tool-search-files",
+				{ query: "hooks", file: "src/index.ts" },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+		await tools
+			.get("mulch_query")
+			?.execute(
+				"tool-query-files",
+				{ file: "/repo/src/index.ts" },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+		await tools
+			.get("mulch_query")
+			?.execute(
+				"tool-query-outside",
+				{ file: "/other/shared.ts" },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+
+		expect(calls).toEqual([
+			{
+				cwd: "/home/user",
+				args: ["search", "hooks", "--file", "/repo/src/index.ts"],
+			},
+			{
+				cwd: "/repo",
+				args: ["search", "hooks", "--file", "src/index.ts"],
+			},
+			{
+				cwd: "/home/user",
+				args: ["query", "--file", "/repo/src/index.ts"],
+			},
+			{
+				cwd: "/repo",
+				args: ["query", "--file", "src/index.ts"],
+			},
+			{
+				cwd: "/home/user",
+				args: ["query", "--file", "/other/shared.ts"],
+			},
+			{
+				cwd: "/repo",
+				args: ["query", "--file", "../other/shared.ts"],
+			},
+		]);
+	});
+
+	it("runs learn from the repository for every detected scope", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[] = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+					globalDirectoryExists: true,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/repo/.mulch",
+					projectCommandCwd: "/repo",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.cwd);
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "{}",
+					stderr: "",
+					ok: true,
+					json: {},
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_learn")
+			?.execute("tool-learn-repo", {}, undefined, undefined, { cwd: "/repo" });
+
+		expect(calls).toEqual(["/repo", "/repo"]);
+	});
 });
