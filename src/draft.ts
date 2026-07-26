@@ -115,9 +115,11 @@ export function findLatestDraft(
 	repoRoot: string,
 	config: MulchConfig,
 	deps: DraftFsDeps = {},
+	targetRepoRoot?: string,
 ): string | null {
 	const existsSync = deps.existsSync ?? fs.existsSync;
 	const readdirSync = deps.readdirSync ?? fs.readdirSync;
+	const readFileSync = deps.readFileSync ?? fs.readFileSync;
 	const statSync = deps.statSync ?? fs.statSync;
 	const draftDir = resolvePathInsideRoot(
 		repoRoot,
@@ -133,7 +135,22 @@ export function findLatestDraft(
 		.map((entry) => path.join(draftDir, entry))
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
 
-	return candidates[0] ?? null;
+	if (!targetRepoRoot) {
+		return candidates[0] ?? null;
+	}
+
+	return (
+		candidates.find((candidate) => {
+			try {
+				const draft = JSON.parse(
+					readFileSync(candidate, "utf8"),
+				) as MulchDraftFile;
+				return draft.repoRoot === targetRepoRoot;
+			} catch {
+				return false;
+			}
+		}) ?? null
+	);
 }
 
 export function loadDraftFile(
@@ -160,7 +177,9 @@ export function getActionableDraftRecords(
 }
 
 function getPrimaryMulchCommandCwd(detection: MulchDetectionResult): string {
-	return detection.globalCommandCwd ?? detection.commandCwd;
+	return detection.globalDirectoryExists && detection.globalCommandCwd
+		? detection.globalCommandCwd
+		: detection.commandCwd;
 }
 
 export async function maybeWriteSessionDraft(

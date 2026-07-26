@@ -292,7 +292,12 @@ export default function mulchIntegrationExtension(
 
 		const draftPath =
 			args.trim() ||
-			findLatestDraft(path.dirname(detection.directoryPath), config) ||
+			findLatestDraft(
+				path.dirname(detection.directoryPath),
+				config,
+				{},
+				detection.gitRepoRoot,
+			) ||
 			"";
 		if (!draftPath) {
 			sendVisibleMessage("No Mulch draft was found.");
@@ -336,7 +341,12 @@ export default function mulchIntegrationExtension(
 
 		const draftPath =
 			args.trim() ||
-			findLatestDraft(path.dirname(detection.directoryPath), config) ||
+			findLatestDraft(
+				path.dirname(detection.directoryPath),
+				config,
+				{},
+				detection.gitRepoRoot,
+			) ||
 			"";
 		if (!draftPath) {
 			sendVisibleMessage("No Mulch draft was found.");

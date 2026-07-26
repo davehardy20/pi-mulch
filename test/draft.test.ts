@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_MULCH_CONFIG } from "../src/config.js";
 import {
 	applyDraftFile,
+	findLatestDraft,
 	getLatestLinterStatus,
 	loadDraftFile,
 	maybeWriteSessionDraft,
@@ -62,6 +63,37 @@ describe("getLatestLinterStatus", () => {
 				},
 			] as never),
 		).toBe("findings");
+	});
+});
+
+describe("findLatestDraft", () => {
+	it("filters shared global drafts by repository", () => {
+		const globalRoot = makeTempDir();
+		const repoA = makeTempDir();
+		const repoB = makeTempDir();
+		const draftsDir = path.join(globalRoot, ".mulch", "drafts");
+		fs.mkdirSync(draftsDir, { recursive: true });
+		const repoAPath = path.join(draftsDir, "repo-a.json");
+		const repoBPath = path.join(draftsDir, "repo-b.json");
+		const makeDraft = (repoRoot: string): MulchDraftFile => ({
+			version: 1,
+			createdAt: new Date().toISOString(),
+			repoRoot,
+			linterStatus: "clean",
+			lastUserPrompt: "test",
+			touchedFiles: ["src/index.ts"],
+			learn: {},
+			records: [],
+		});
+		fs.writeFileSync(repoAPath, JSON.stringify(makeDraft(repoA)));
+		fs.writeFileSync(repoBPath, JSON.stringify(makeDraft(repoB)));
+		const now = Date.now() / 1000;
+		fs.utimesSync(repoAPath, now - 10, now - 10);
+		fs.utimesSync(repoBPath, now, now);
+
+		expect(findLatestDraft(globalRoot, DEFAULT_MULCH_CONFIG, {}, repoA)).toBe(
+			repoAPath,
+		);
 	});
 });
 
@@ -175,6 +207,53 @@ describe("maybeWriteSessionDraft", () => {
 			draftPath?.startsWith(path.join(globalRoot, ".mulch", "drafts")),
 		).toBe(true);
 		expect(loadDraftFile(draftPath as string).repoRoot).toBe(repoRoot);
+	});
+
+	it("falls back to the project store when the global store is absent", async () => {
+		const repoRoot = makeTempDir();
+		const homeRoot = makeTempDir();
+		let learnCwd: string | undefined;
+
+		const draftPath = await maybeWriteSessionDraft(
+			{
+				detection: {
+					...readyDetection(repoRoot),
+					globalDirectoryExists: false,
+					globalDirectoryPath: path.join(homeRoot, ".mulch"),
+					globalCommandCwd: homeRoot,
+				},
+				config: DEFAULT_MULCH_CONFIG,
+				sessionManager: {
+					getEntries: () => [
+						{
+							type: "custom_message",
+							customType: "post-turn-linter-status",
+							details: { status: "clean" },
+						},
+					],
+				} as never,
+				touchedFiles: [path.join(repoRoot, "src/index.ts")],
+				lastUserPrompt: "implement feature",
+			},
+			async (options) => {
+				learnCwd = options.cwd;
+				return {
+					command: "mulch",
+					args: ["learn"],
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: '{"suggestedDomains":["extensions"]}',
+					stderr: "",
+					ok: true,
+					json: { suggestedDomains: ["extensions"] },
+				};
+			},
+		);
+
+		expect(learnCwd).toBe(repoRoot);
+		expect(draftPath?.startsWith(path.join(repoRoot, ".mulch", "drafts"))).toBe(
+			true,
+		);
 	});
 });
 
