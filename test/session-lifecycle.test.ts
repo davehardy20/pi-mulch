@@ -1012,7 +1012,7 @@ describe("session lifecycle", () => {
 	});
 
 	describe("commands", () => {
-		it("runs /mulch-learn from the repository for every scope", async () => {
+		it("runs /mulch-learn once from the repository", async () => {
 			const repoRoot = makeTempDir();
 			const homeRoot = makeTempDir();
 			const { pi, commands } = createMockPi();
@@ -1048,7 +1048,7 @@ describe("session lifecycle", () => {
 
 			await commands.get("mulch-learn")?.handler("", createCtx(repoRoot));
 
-			expect(calls).toEqual([repoRoot, repoRoot]);
+			expect(calls).toEqual([repoRoot]);
 		});
 	});
 });

@@ -7,7 +7,7 @@
 **Package:** `@davehardy20/pi-mulch` v0.1.1 (`/package.json`)  
 **License:** MIT  
 **Runtime:** Node.js, TypeScript ESM (`"type": "module"`, target ES2022)  
-**Peer dependency:** `@earendil-works/pi-coding-agent` (required), `typebox` (optional)
+**Peer dependencies:** `@earendil-works/pi-coding-agent` and `typebox` (both required)
 
 ---
 

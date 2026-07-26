@@ -311,7 +311,18 @@ async function scopedToolResult(
 	deps: RunMulchCommandDeps,
 	options: ScopedToolOptions = {},
 ) {
-	const scopes = getMulchStoreScopes(detection);
+	const detectedScopes = getMulchStoreScopes(detection);
+	const scopes =
+		args[0] === "learn" && detection.gitRepoRoot && detectedScopes[0]
+			? [
+					{
+						...detectedScopes[0],
+						kind: "primary" as const,
+						label: "Repository change analysis",
+						commandCwd: detection.gitRepoRoot,
+					},
+				]
+			: detectedScopes;
 	const rendered: string[] = [];
 	const details: Array<Record<string, unknown>> = [];
 	const jsonResults: unknown[] = [];
@@ -323,10 +334,7 @@ async function scopedToolResult(
 			{
 				command: detection.cliCommand,
 				args: scopedArgs,
-				cwd:
-					args[0] === "learn"
-						? (detection.gitRepoRoot ?? scope.commandCwd)
-						: scope.commandCwd,
+				cwd: scope.commandCwd,
 				json: options.json,
 				signal: options.signal,
 			},
@@ -352,23 +360,25 @@ async function scopedToolResult(
 		return errorToolResult("Mulch is not ready in any memory scope.");
 	}
 
+	const rawText = rendered.join("\n\n---\n\n");
+	if (options.fullOutput !== true && rawText.length > config.outputMaxChars) {
+		for (const detail of details) {
+			delete detail.json;
+		}
+	}
+
 	const json =
 		jsonResults.length === 1
 			? (jsonResults[0] as { json: unknown }).json
 			: jsonResults.length > 1
 				? { scopes: jsonResults }
 				: undefined;
-	return textToolResult(
-		rendered.join("\n\n---\n\n"),
-		config,
-		options.fullOutput,
-		{
-			command: `${detection.cliCommand} ${args.join(" ")}`.trim(),
-			success,
-			scopes: details,
-			json,
-		},
-	);
+	return textToolResult(rawText, config, options.fullOutput, {
+		command: `${detection.cliCommand} ${args.join(" ")}`.trim(),
+		success,
+		scopes: details,
+		json,
+	});
 }
 
 function renderScopedResult(

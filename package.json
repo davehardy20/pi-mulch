@@ -39,9 +39,6 @@
 	"peerDependenciesMeta": {
 		"@earendil-works/pi-coding-agent": {
 			"optional": false
-		},
-		"typebox": {
-			"optional": true
 		}
 	},
 	"devDependencies": {

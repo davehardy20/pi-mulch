@@ -165,6 +165,9 @@ describe("registerMulchTools", () => {
 		expect(capped.content[0]?.text).toContain("Mulch output truncated");
 		expect(capped.details.outputTruncated).toBe(true);
 		expect(capped.details.json).toBeUndefined();
+		expect(
+			(capped.details.scopes as Array<Record<string, unknown>>)[0]?.json,
+		).toBeUndefined();
 		expect(capped.details.recovery).toContain("fullOutput=true");
 
 		const full = (await tools
@@ -180,6 +183,9 @@ describe("registerMulchTools", () => {
 		expect(full.content[0]?.text).toContain(largeValue);
 		expect(full.details.outputTruncated).toBe(false);
 		expect(full.details.json).toEqual({ records: [{ content: largeValue }] });
+		expect(
+			(full.details.scopes as Array<Record<string, unknown>>)[0]?.json,
+		).toEqual({ records: [{ content: largeValue }] });
 	});
 
 	it("mulch_search returns error result when Mulch is not ready", async () => {
@@ -553,6 +559,6 @@ describe("registerMulchTools", () => {
 			.get("mulch_learn")
 			?.execute("tool-learn-repo", {}, undefined, undefined, { cwd: "/repo" });
 
-		expect(calls).toEqual(["/repo", "/repo"]);
+		expect(calls).toEqual(["/repo"]);
 	});
 });

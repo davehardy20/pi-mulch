@@ -212,18 +212,28 @@ export default function mulchIntegrationExtension(
 			return;
 		}
 
+		const detectedScopes = getMulchStoreScopes(detection);
+		const scopes =
+			args[0] === "learn" && detection.gitRepoRoot && detectedScopes[0]
+				? [
+						{
+							...detectedScopes[0],
+							kind: "primary" as const,
+							label: "Repository change analysis",
+							commandCwd: detection.gitRepoRoot,
+						},
+					]
+				: detectedScopes;
+
 		const rendered: string[] = [];
 		const results: Array<Record<string, unknown>> = [];
 		let success = false;
 
-		for (const scope of getMulchStoreScopes(detection)) {
+		for (const scope of scopes) {
 			const result = await runMulch({
 				command: detection.cliCommand,
 				args,
-				cwd:
-					args[0] === "learn"
-						? (detection.gitRepoRoot ?? scope.commandCwd)
-						: scope.commandCwd,
+				cwd: scope.commandCwd,
 				json,
 			});
 			if (result.ok) success = true;
