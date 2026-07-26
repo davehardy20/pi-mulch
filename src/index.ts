@@ -1,4 +1,9 @@
 import * as path from "node:path";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MULCH_CONFIG, loadMulchConfig } from "./config.js";
 import {
 	type DetectOptions,
@@ -19,11 +24,6 @@ import {
 	extractPathsFromToolResult,
 	extractPathsFromToolResultDetails,
 } from "./paths.js";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	ExtensionContext,
-} from "./pi-types.js";
 import { createPrimeInjection, shouldInjectPrime } from "./prime.js";
 import {
 	createMulchSessionState,

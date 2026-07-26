@@ -1,3 +1,5 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import {
 	getMulchStoreScopes,
 	type MulchDetectionResult,
@@ -8,9 +10,7 @@ import {
 	type RunMulchCommandDeps,
 	runMulchCommand,
 } from "./exec.js";
-import type { ExtensionAPI } from "./pi-types.js";
 import { createPrimeInjection } from "./prime.js";
-import { Type } from "./schema.js";
 import type { MulchConfig } from "./types.js";
 
 const FULL_OUTPUT_DESCRIPTION =
@@ -301,8 +301,18 @@ async function scopedToolResult(
 			deps,
 		);
 		if (result.ok) success = true;
-		details.push(buildResultDetails(result, options.fullOutput === true));
-		if (result.json !== undefined) jsonResults.push(result.json);
+		details.push({
+			kind: scope.kind,
+			label: scope.label,
+			...buildResultDetails(result, options.fullOutput === true),
+		});
+		if (result.json !== undefined) {
+			jsonResults.push({
+				kind: scope.kind,
+				label: scope.label,
+				json: result.json,
+			});
+		}
 		rendered.push(renderScopedResult(scope, result));
 	}
 
@@ -310,7 +320,12 @@ async function scopedToolResult(
 		return errorToolResult("Mulch is not ready in any memory scope.");
 	}
 
-	const json = jsonResults.length === 1 ? jsonResults[0] : undefined;
+	const json =
+		jsonResults.length === 1
+			? (jsonResults[0] as { json: unknown }).json
+			: jsonResults.length > 1
+				? { scopes: jsonResults }
+				: undefined;
 	return textToolResult(
 		rendered.join("\n\n---\n\n"),
 		config,

@@ -27,7 +27,11 @@ export function buildPrimeRequest(
 			(filePath) =>
 				filePath === repoRoot || filePath.startsWith(`${repoRoot}${path.sep}`),
 		)
-		.map((filePath) => toRepoRelativePath(filePath, repoRoot))
+		.map((filePath) =>
+			scope?.kind === "global"
+				? filePath
+				: toRepoRelativePath(filePath, repoRoot),
+		)
 		.filter((filePath) => filePath !== ".")
 		.slice(0, config.maxTrackedFiles);
 

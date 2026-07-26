@@ -1,6 +1,6 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MULCH_CONFIG } from "../src/config.js";
-import type { ExtensionAPI } from "../src/pi-types.js";
 import { registerMulchTools } from "../src/tools.js";
 
 interface RegisteredTool {
@@ -342,5 +342,84 @@ describe("registerMulchTools", () => {
 		expect(result.details.success).toBe(false);
 		expect(result.content[0]?.text).toContain("Command: mulch search bad");
 		expect(result.content[0]?.text).toContain("Exit code: 1");
+	});
+
+	it("aggregates multi-scope JSON and partial success details", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[] = [];
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({
+					...READY_DETECTION,
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+					globalDirectoryExists: true,
+					globalDirectoryPath: "/home/user/.mulch",
+					globalCommandCwd: "/home/user",
+					projectDirectoryExists: true,
+					projectDirectoryPath: "/repo/.mulch",
+					projectCommandCwd: "/repo",
+				}),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.cwd);
+				const isGlobal = options.cwd === "/home/user";
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: isGlobal ? 0 : 1,
+					stdout: JSON.stringify({ scope: isGlobal ? "global" : "project" }),
+					stderr: isGlobal ? "" : "project failed",
+					ok: isGlobal,
+					json: { scope: isGlobal ? "global" : "project" },
+				};
+			},
+		);
+
+		const result = (await tools
+			.get("mulch_search")
+			?.execute("tool-scopes", { query: "hooks" }, undefined, undefined, {
+				cwd: "/repo",
+			})) as {
+			isError: boolean;
+			details: {
+				success: boolean;
+				scopes: Array<Record<string, unknown>>;
+				json: { scopes: Array<Record<string, unknown>> };
+			};
+			content: Array<{ text: string }>;
+		};
+
+		expect(calls).toEqual(["/home/user", "/repo"]);
+		expect(result.isError).toBe(false);
+		expect(result.details.success).toBe(true);
+		expect(result.details.scopes).toMatchObject([
+			{ kind: "global", success: true, cwd: "/home/user" },
+			{ kind: "project", success: false, cwd: "/repo" },
+		]);
+		expect(result.details.json).toEqual({
+			scopes: [
+				{
+					kind: "global",
+					label: "Global Mulch memories (~/.mulch)",
+					json: { scope: "global" },
+				},
+				{
+					kind: "project",
+					label: "Repository-specific Mulch memories (.mulch)",
+					json: { scope: "project" },
+				},
+			],
+		});
+		expect(result.content[0]?.text).toContain(
+			"## Global Mulch memories (~/.mulch)",
+		);
+		expect(result.content[0]?.text).toContain(
+			"## Repository-specific Mulch memories (.mulch)",
+		);
 	});
 });

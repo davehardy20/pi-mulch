@@ -64,6 +64,34 @@ describe("buildPrimeRequest", () => {
 			signature: "primary:files:src/index.ts:4000",
 		});
 	});
+
+	it("uses absolute file paths for the global store", () => {
+		expect(
+			buildPrimeRequest(
+				detection,
+				["/repo/src/index.ts"],
+				DEFAULT_MULCH_CONFIG,
+				{
+					kind: "global",
+					label: "Global Mulch memories (~/.mulch)",
+					directoryPath: "/home/user/.mulch",
+					commandCwd: "/home/user",
+				},
+			),
+		).toMatchObject({
+			mode: "files",
+			args: [
+				"prime",
+				"--files",
+				"/repo/src/index.ts",
+				"--budget",
+				"4000",
+				"--format",
+				"plain",
+			],
+			signature: "global:files:/repo/src/index.ts:4000",
+		});
+	});
 });
 
 describe("createPrimeInjection", () => {
