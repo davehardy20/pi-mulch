@@ -111,7 +111,7 @@ shouldInjectPrime(lastSignature, lastContent, nextInjection)
   → true only if signature OR content changed since last injection
 ```
 
-- **File-scoped mode** activates when the session has touched files inside the repo root. Files are converted to repo-relative and capped at `maxTrackedFiles` (default 24).
+- **File-scoped mode** activates when the session has touched files inside the repo root. Global-store scopes keep absolute paths; project-store scopes convert them to repository-relative paths. Files are capped at `maxTrackedFiles` (default 24).
 - **Manifest mode** is the default when no files have been touched yet.
 - The injection is sent as a hidden message (`display: false`) with `customType: "mulch-prime"`.
 
@@ -128,10 +128,10 @@ maybeWriteSessionDraft(params)
   1. Check all gating conditions → return null if any fail
   2. getLatestLinterStatus(entries) → must be "clean"
   3. Filter touchedFiles to those inside gitRepoRoot
-  4. Run: mulch learn --json (in global commandCwd, normally the home directory)
+  4. Run: mulch learn --json (from gitRepoRoot for global-store drafts; from the detected project cwd for project-store fallback)
   5. buildDraftFile({ repoRoot, linterStatus, touchedFiles, lastUserPrompt, learn })
        → Creates placeholder records (one per suggestedDomain)
-  6. writeDraftFile(mulchRoot, config, draft) → ~/.mulch/drafts/pi-mulch-draft-<timestamp>.json by default
+  6. writeDraftFile(mulchRoot, config, draft) → `.mulch/drafts/pi-mulch-draft-<timestamp>-<uuid>.json` under the selected global or project store
   7. Return file path
 ```
 
