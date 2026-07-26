@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
 	ExtensionAPI,
@@ -296,7 +297,8 @@ export default function mulchIntegrationExtension(
 	function findLatestDetectedDraft(
 		detection: MulchDetectionResult,
 	): string | null {
-		if (!detection.gitRepoRoot) return null;
+		const repoRoot = detection.gitRepoRoot;
+		if (!repoRoot) return null;
 		const storeDirectories = [
 			detection.directoryPath,
 			detection.projectDirectoryExists
@@ -304,16 +306,16 @@ export default function mulchIntegrationExtension(
 				: undefined,
 		].filter((directory): directory is string => Boolean(directory));
 
-		for (const directory of new Set(storeDirectories)) {
-			const draftPath = findLatestDraft(
-				path.dirname(directory),
-				config,
-				{},
-				detection.gitRepoRoot,
-			);
-			if (draftPath) return draftPath;
-		}
-		return null;
+		const candidates = Array.from(new Set(storeDirectories))
+			.map((directory) =>
+				findLatestDraft(path.dirname(directory), config, {}, repoRoot),
+			)
+			.filter((draftPath): draftPath is string => draftPath !== null);
+		return (
+			candidates.sort(
+				(left, right) => fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs,
+			)[0] ?? null
+		);
 	}
 
 	async function commandReview(

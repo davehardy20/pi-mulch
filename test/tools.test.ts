@@ -129,6 +129,47 @@ describe("registerMulchTools", () => {
 		]);
 	});
 
+	it("resolves relative mulch_prime files from the repository", async () => {
+		const { pi, tools } = createMockPi();
+		const calls: string[][] = [];
+
+		registerMulchTools(
+			pi,
+			{
+				getConfig: () => DEFAULT_MULCH_CONFIG,
+				getDetection: () => ({ ...READY_DETECTION }),
+				getTouchedFiles: () => [],
+			},
+			async (options) => {
+				calls.push(options.args);
+				return {
+					command: options.command as string,
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "prime context",
+					stderr: "",
+					ok: true,
+				};
+			},
+		);
+
+		await tools
+			.get("mulch_prime")
+			?.execute(
+				"tool-relative-prime",
+				{ files: ["src/index.ts"] },
+				undefined,
+				undefined,
+				{ cwd: "/repo" },
+			);
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toContain("--files");
+		expect(calls[0]).toContain("src/index.ts");
+		expect(calls[0]).not.toContain("--manifest");
+	});
+
 	it("caps oversized default Mulch tool output and keeps full output recoverable", async () => {
 		const { pi, tools } = createMockPi();
 		const largeValue = "x".repeat(2_000);

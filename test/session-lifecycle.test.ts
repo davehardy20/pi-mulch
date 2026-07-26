@@ -1101,6 +1101,27 @@ describe("session lifecycle", () => {
 				"Review Mulch draft before apply",
 				expect.stringContaining("project draft"),
 			);
+
+			const globalDraftDir = path.join(homeRoot, ".mulch", "drafts");
+			fs.mkdirSync(globalDraftDir, { recursive: true });
+			const globalDraftPath = path.join(globalDraftDir, "global-draft.json");
+			fs.writeFileSync(
+				globalDraftPath,
+				JSON.stringify({
+					...JSON.parse(fs.readFileSync(draftPath, "utf8")),
+					lastUserPrompt: "stale global draft",
+				}),
+			);
+			const now = Date.now() / 1_000;
+			fs.utimesSync(globalDraftPath, now - 60, now - 60);
+			fs.utimesSync(draftPath, now, now);
+
+			await commands
+				.get("mulch-review")
+				?.handler("", createCtx(repoRoot, { hasUI: false }));
+
+			expect(sentMessages.at(-1)?.details).toEqual({ draftPath });
+			expect(sentMessages.at(-1)?.content).toContain("project draft");
 		});
 	});
 });

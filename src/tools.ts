@@ -62,7 +62,9 @@ export function registerMulchTools(
 						detection,
 						touchedFiles:
 							params.files && params.files.length > 0
-								? params.files.map((filePath) => filePath)
+								? params.files.map((filePath) =>
+										path.resolve(detection.gitRepoRoot ?? ctx.cwd, filePath),
+									)
 								: runtime.getTouchedFiles(),
 						config: {
 							...config,
