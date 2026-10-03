@@ -111,15 +111,22 @@ session end**. You should not need to run `ml learn` and `ml record
 4. Drafts are written to the active Mulch store, normally `~/.mulch/drafts/`.
 5. You review drafts with `/mulch-review`.
 6. You apply drafts with `/mulch-apply`.
-7. After applying drafts to real Mulch records, run `ml sync` from your home directory to
-   validate and commit `~/.mulch/` changes.
+7. After applying drafts to real Mulch records, run `/mulch-sync` to validate
+   and commit changes. If `~/.mulch` links to a `.mulch` directory inside its
+   own Git repository, sync runs from that repository root instead of home.
+   The target must be a directory named `.mulch` with real parent `.git`
+   metadata; invalid or broken links fail closed. Reads still use `~/.mulch`.
+   For direct CLI use, run `ml sync` from the directory containing the real
+   `.mulch` store (for example, `cd ~/tools/global-mulch && ml sync`).
+   Legacy non-symlink global stores still sync from home.
 
 ### Important distinction
 
 - **Automatic when enabled:** session-end draft generation into
   `~/.mulch/drafts/` by default
 - **Manual review step:** `/mulch-review` and `/mulch-apply`
-- **Manual persistence/sync step:** `ml sync`
+- **Manual persistence/sync step:** `/mulch-sync` (or `ml sync` from the store's repo root)
+- **Existing Pi sessions:** `/reload` after changing the extension
 
 ### When to use `ml learn` and `ml record`
 

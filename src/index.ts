@@ -88,6 +88,28 @@ export default function mulchIntegrationExtension(
 		);
 	}
 
+	function getSyncCommandCwd(detection: MulchDetectionResult): string {
+		if (!detection.globalDirectoryExists) return detection.commandCwd;
+		try {
+			const store = getGlobalMulchDirectoryPath(detection);
+			if (!fs.lstatSync(store).isSymbolicLink()) return detection.commandCwd;
+			const realStore = fs.realpathSync(store);
+			const repoRoot = path.dirname(realStore);
+			if (
+				path.basename(realStore) !== ".mulch" ||
+				!fs.statSync(realStore).isDirectory() ||
+				!fs.lstatSync(path.join(repoRoot, ".git")).isDirectory()
+			) {
+				throw new Error("Unsupported global Mulch store layout.");
+			}
+			return repoRoot;
+		} catch {
+			throw new Error(
+				"Relocated global Mulch store must be a .mulch directory inside its own Git repository.",
+			);
+		}
+	}
+
 	function isGlobalMulchInitialized(detection: MulchDetectionResult): boolean {
 		return detection.globalDirectoryExists ?? detection.directoryExists;
 	}
@@ -189,7 +211,10 @@ export default function mulchIntegrationExtension(
 		const result = await runMulch({
 			command: detection.cliCommand,
 			args,
-			cwd: detection.commandCwd,
+			cwd:
+				args[0] === "sync"
+					? getSyncCommandCwd(detection)
+					: detection.commandCwd,
 			json,
 		});
 
