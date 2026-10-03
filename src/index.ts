@@ -89,10 +89,28 @@ export default function mulchIntegrationExtension(
 	}
 
 	function getSyncCommandCwd(detection: MulchDetectionResult): string {
-		if (!detection.globalDirectoryExists) return detection.commandCwd;
+		const store =
+			detection.globalDirectoryPath ??
+			(detection.globalDirectoryExists ? detection.directoryPath : null);
+		if (!store) return detection.commandCwd;
+
+		// Detection uses stat, which follows links. Inspect the link itself before
+		// treating a missing global target as permission to sync project memories.
+		let storeStat: fs.Stats;
 		try {
-			const store = getGlobalMulchDirectoryPath(detection);
-			if (!fs.lstatSync(store).isSymbolicLink()) return detection.commandCwd;
+			storeStat = fs.lstatSync(store);
+		} catch (error) {
+			if (
+				(error as NodeJS.ErrnoException).code === "ENOENT" &&
+				!detection.globalDirectoryExists
+			) {
+				return detection.commandCwd;
+			}
+			throw new Error("Unable to inspect the global Mulch store for sync.");
+		}
+		if (!storeStat.isSymbolicLink()) return detection.commandCwd;
+
+		try {
 			const realStore = fs.realpathSync(store);
 			const repoRoot = path.dirname(realStore);
 			if (
