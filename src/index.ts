@@ -461,7 +461,13 @@ export default function mulchIntegrationExtension(
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		state.lastUserPrompt = event.prompt ?? "";
+		// Pi 1.2+ also fires this for runs started by pi.sendMessage(..., { triggerTurn: true }),
+		// and those events carry `message` with no `prompt`. Keep the last real user
+		// prompt for them; prime injection still applies.
+		const startEvent = event as { prompt?: string; messageType?: string };
+		if (startEvent.messageType !== "custom") {
+			state.lastUserPrompt = startEvent.prompt ?? "";
+		}
 		if (!config.enabled) return;
 
 		const detection = getDetection(ctx.cwd);

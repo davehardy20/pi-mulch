@@ -281,7 +281,7 @@ describe("session lifecycle", () => {
 			expect(result).toBeUndefined();
 		});
 
-		it("stores lastUserPrompt on every before_agent_start", async () => {
+		it("stores lastUserPrompt on user-prompt runs", async () => {
 			const repoRoot = makeTempDir();
 			const { pi, eventHandlers } = createMockPi();
 
@@ -327,6 +327,71 @@ describe("session lifecycle", () => {
 			await eventHandlers.get("session_shutdown")?.({}, ctx);
 
 			// Draft should have been written with lastUserPrompt
+			const files = fs.readdirSync(draftPath);
+			expect(files.length).toBeGreaterThan(0);
+			const draft = JSON.parse(
+				fs.readFileSync(path.join(draftPath, files[0] as string), "utf8"),
+			);
+			expect(draft.lastUserPrompt).toBe("first prompt");
+		});
+
+		it("keeps lastUserPrompt across custom-message runs", async () => {
+			const repoRoot = makeTempDir();
+			const { pi, eventHandlers } = createMockPi();
+
+			mulchIntegrationExtension(pi, {
+				loadConfig: () => DEFAULT_MULCH_CONFIG,
+				detectMulch: () => readyDetection(repoRoot),
+				runMulchCommand: vi.fn(async (options: RunMulchCommandOptions) => ({
+					command: options.command ?? "mulch",
+					args: options.args,
+					cwd: options.cwd,
+					exitCode: 0,
+					stdout: "prime",
+					stderr: "",
+					ok: true,
+				})),
+			});
+
+			const ctx = createCtx(repoRoot, {
+				entries: [
+					{
+						type: "custom_message",
+						customType: "post-turn-linter-status",
+						details: { status: "clean" },
+					} as unknown as SessionEntry,
+				],
+			});
+			await eventHandlers.get("session_start")?.({}, ctx);
+
+			await eventHandlers.get("tool_call")?.(
+				{ toolName: "read", input: { path: "src/index.ts" } },
+				ctx,
+			);
+
+			await eventHandlers.get("before_agent_start")?.(
+				{ messageType: "user", prompt: "first prompt" },
+				ctx,
+			);
+
+			// Pi 1.2+ fires before_agent_start for extension-triggered runs with
+			// messageType "custom" and no prompt. That must not blank the prompt.
+			await eventHandlers.get("before_agent_start")?.(
+				{
+					messageType: "custom",
+					message: {
+						type: "custom",
+						customType: "orch_mailbox",
+						content: "wake",
+					},
+				},
+				ctx,
+			);
+
+			const draftPath = path.join(repoRoot, ".mulch", "drafts");
+			fs.mkdirSync(draftPath, { recursive: true });
+			await eventHandlers.get("session_shutdown")?.({}, ctx);
+
 			const files = fs.readdirSync(draftPath);
 			expect(files.length).toBeGreaterThan(0);
 			const draft = JSON.parse(
