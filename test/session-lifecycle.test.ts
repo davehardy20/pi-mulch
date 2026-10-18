@@ -374,8 +374,9 @@ describe("session lifecycle", () => {
 				ctx,
 			);
 
-			// Pi 1.2+ fires before_agent_start for extension-triggered runs with
-			// messageType "custom" and no prompt. That must not blank the prompt.
+			// Simulates the unverified forward-compat contract guarded in src/index.ts:
+			// a future Pi firing before_agent_start for custom-message runs with
+			// messageType "custom" and no prompt must not blank the stored prompt.
 			await eventHandlers.get("before_agent_start")?.(
 				{
 					messageType: "custom",
