@@ -461,7 +461,17 @@ export default function mulchIntegrationExtension(
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		state.lastUserPrompt = event.prompt ?? "";
+		// Unverified forward-compat guard: no shipped Pi emits `messageType` on this
+		// event (checked through 0.87.1 — `prompt` is always a string, and extension
+		// user messages still route through prompt()). If a future Pi fires this
+		// hook for custom-message-triggered runs and tags them `messageType:
+		// "custom"` with no `prompt`, keep the last real user prompt instead of
+		// blanking it; prime injection still applies. Re-check against the real
+		// event shape when that contract lands upstream.
+		const startEvent = event as { prompt?: string; messageType?: string };
+		if (startEvent.messageType !== "custom") {
+			state.lastUserPrompt = startEvent.prompt ?? "";
+		}
 		if (!config.enabled) return;
 
 		const detection = getDetection(ctx.cwd);
